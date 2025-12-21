@@ -5,7 +5,7 @@ permissions:
   actions: write
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       build_a12_510: { type: boolean, default: false }
       build_a13_510: { type: boolean, default: false }
