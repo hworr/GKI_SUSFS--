@@ -1,0 +1,149 @@
+name: GKI A15 6.6 (KernelSU-Next + SUSFS + Docker)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      ANDROID_VERSION: android15
+      KERNEL_VERSION: "6.6"
+      SUBLEVEL: "102"
+      PATCHLEVEL: "2025-10"
+      CONFIG: android15-6.6-102
+
+    steps:
+    # --------------------------------------------------
+    # Space + deps
+    # --------------------------------------------------
+    - uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 8192
+        temp-reserve-mb: 2048
+        swap-size-mb: 8192
+        remove-dotnet: "true"
+        remove-android: "true"
+        remove-haskell: "true"
+        remove-codeql: "true"
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          git curl python3 repo ccache lz4 openssl
+
+    # --------------------------------------------------
+    # Kernel source (ONCE!)
+    # --------------------------------------------------
+    - name: Init kernel source
+      run: |
+        mkdir "$CONFIG"
+        cd "$CONFIG"
+
+        repo init --depth=1 \
+          -u https://android.googlesource.com/kernel/manifest \
+          -b common-${ANDROID_VERSION}-${KERNEL_VERSION}-${PATCHLEVEL}
+
+        repo sync -c -j$(nproc) --no-tags
+
+    # --------------------------------------------------
+    # KernelSU-Next (CORRECT POSITION)
+    # --------------------------------------------------
+    - name: Add KernelSU-Next
+      run: |
+        cd "$CONFIG"
+        curl -LSs \
+          https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh \
+          | bash -
+
+    # --------------------------------------------------
+    # SUSFS (Pixel-safe core patch)
+    # --------------------------------------------------
+    - name: Apply SUSFS core
+      run: |
+        git clone https://gitlab.com/WildKernels/susfs4ksu.git
+        cd "$CONFIG/common"
+
+        patch -p1 < \
+          ../../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch || true
+
+        rm -f fs/proc/*.rej
+
+    # --------------------------------------------------
+    # Defconfig (CLEAN & SAFE)
+    # --------------------------------------------------
+    - name: Kernel config
+      run: |
+        CFG="$CONFIG/common/arch/arm64/configs/gki_defconfig"
+
+        add() { grep -q "^$1=" "$CFG" || echo "$1=$2" >> "$CFG"; }
+
+        # KernelSU
+        add CONFIG_KSU y
+        add CONFIG_KSU_MANUAL_HOOK y
+        add CONFIG_KSU_MANUAL_SU n
+
+        # SUSFS (Pixel safe)
+        add CONFIG_KSU_SUSFS y
+        add CONFIG_TMPFS_XATTR y
+        add CONFIG_TMPFS_POSIX_ACL y
+        add CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT y
+        add CONFIG_KSU_SUSFS_SUS_PATH y
+        add CONFIG_KSU_SUSFS_SPOOF_UNAME y
+
+        # 🚫 disable dangerous umount logic
+        add CONFIG_KSU_SUSFS_TRY_UMOUNT n
+        add CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT n
+        add CONFIG_KSU_SUSFS_SUS_MOUNT n
+        add CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT n
+        add CONFIG_KSU_SUSFS_ENABLE_LOG n
+
+        # Docker essentials
+        add CONFIG_NAMESPACES y
+        add CONFIG_PID_NS y
+        add CONFIG_IPC_NS y
+        add CONFIG_UTS_NS y
+        add CONFIG_USER_NS y
+        add CONFIG_NET_NS y
+        add CONFIG_CGROUPS y
+        add CONFIG_CGROUP_DEVICE y
+        add CONFIG_OVERLAY_FS y
+        add CONFIG_VETH y
+        add CONFIG_BRIDGE y
+        add CONFIG_BRIDGE_NETFILTER y
+
+        # BBR
+        add CONFIG_TCP_CONG_ADVANCED y
+        add CONFIG_TCP_CONG_BBR y
+        add CONFIG_NET_SCH_FQ y
+
+        # clean version string
+        sed -i 's/check_defconfig//' $CONFIG/common/build.config.gki
+        sed -i 's/-maybe-dirty//g; s/-dirty//g' \
+          $CONFIG/common/scripts/setlocalversion
+
+    # --------------------------------------------------
+    # Build
+    # --------------------------------------------------
+    - name: Build kernel
+      run: |
+        cd "$CONFIG"
+
+        sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' \
+          common/build.config.gki.aarch64
+
+        sed -i '/MODULES_ORDER=/d' common/build.config.gki.aarch64
+        sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64
+
+        tools/bazel build --config=fast //common:kernel_aarch64_dist
+
+    # --------------------------------------------------
+    # Artifacts
+    # --------------------------------------------------
+    - name: Upload Image
+      uses: actions/upload-artifact@v4
+      with:
+        name: Image-${{ env.CONFIG }}
+        path: ${{ env.CONFIG }}/bazel-bin/common/kernel_aarch64/Image
