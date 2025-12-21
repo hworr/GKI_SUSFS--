@@ -112,7 +112,6 @@ jobs:
           git clone https://github.com/ShirkNeko/susfs4ksu.git
 
       - name: Apply SUSFS patches (Android 15 / 6.6)
-        if: ${{ inputs.require_susfs }}
         run: |
           cd "$CONFIG"
 
