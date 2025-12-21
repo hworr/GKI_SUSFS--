@@ -118,7 +118,6 @@ jobs:
       # --------------------------------------------------
       - name: Init kernel source
         run: |
-          mkdir "$CONFIG"
           cd "$CONFIG"
 
           BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
