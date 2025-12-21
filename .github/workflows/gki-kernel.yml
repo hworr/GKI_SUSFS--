@@ -102,7 +102,10 @@ jobs:
       - name: Add KernelSU Next
         run: |
           cd "$CONFIG"
-          curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/next/kernel/setup.sh | bash
+          curl -LSs - name: Add KernelSU-Next
+  run: |
+    cd "$CONFIG"
+    curl -LSs https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh | bash - | bash
 
       # -------------------------------
       # SUSFS (optional)
