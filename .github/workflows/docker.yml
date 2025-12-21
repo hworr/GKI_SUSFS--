@@ -1,4 +1,4 @@
-name: GKI Kernel (KernelSU-Next + SUSFS + BBR)
+name: docker
 
 permissions:
   contents: write
