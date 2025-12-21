@@ -286,11 +286,10 @@ jobs:
             $UNPACK_BOOTIMG --boot_img="$(pwd)/boot-5.10.img"
             RAMDISK_ARGS="--ramdisk out/ramdisk --os_version 12.0.0 --os_patch_level ${{ inputs.os_patch_level }}"
           fi
-
-          # Create compressed kernels
+          
           gzip -n -k -f Image
-          lz4 -l Image Image.lz4
-
+          lz4 -f Image Image.lz4
+          
           for suffix in "" ".gz" ".lz4"; do
             kernel="Image${suffix}"
             output="boot${suffix//./-}.img"
