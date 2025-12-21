@@ -1,4 +1,4 @@
-name: Build and Release GKI Kernels
+choice: Build and Release GKI Kernels
 
 permissions:
   contents: write
@@ -38,6 +38,7 @@ on:
       kernelsu_variant:
         description: "KernelSU variant"
         type: choice
+        default: Next
       kernelsu_branch:
         description: "KernelSU branch"
         type: choice
