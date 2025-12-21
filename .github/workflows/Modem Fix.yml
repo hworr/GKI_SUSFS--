@@ -1,0 +1,192 @@
+name: Modem fix
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      android_version:
+        type: string
+        default: android15
+      kernel_version:
+        type: string
+        default: "6.6"
+      sub_level:
+        type: string
+        default: "102"
+      os_patch_level:
+        type: string
+        default: "2025-10"
+      require_susfs:
+        type: boolean
+        default: true
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-latest
+
+    env:
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+
+    steps:
+    # --------------------------------------------------
+    # Space & Dependencies
+    # --------------------------------------------------
+    - name: Maximize build space
+      uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 8192
+        temp-reserve-mb: 2048
+        swap-size-mb: 8192
+        remove-dotnet: "true"
+        remove-android: "true"
+        remove-haskell: "true"
+        remove-codeql: "true"
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y git curl python3 ccache repo lz4 openssl
+
+    # --------------------------------------------------
+    # ENV
+    # --------------------------------------------------
+    - name: Set environment
+      run: |
+        CONFIG="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}"
+        KERNEL_ROOT="$GITHUB_WORKSPACE/$CONFIG"
+        echo "CONFIG=$CONFIG" >> $GITHUB_ENV
+        echo "KERNEL_ROOT=$KERNEL_ROOT" >> $GITHUB_ENV
+        mkdir -p "$KERNEL_ROOT"
+
+    # --------------------------------------------------
+    # Build tools
+    # --------------------------------------------------
+    - name: Setup build tools
+      run: |
+        git clone https://android.googlesource.com/kernel/prebuilts/build-tools kernel-build-tools
+        git clone https://android.googlesource.com/platform/system/tools/mkbootimg mkbootimg
+        echo "PATH=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/bin:$PATH" >> $GITHUB_ENV
+        echo "AVBTOOL=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/bin/avbtool" >> $GITHUB_ENV
+        echo "MKBOOTIMG=$GITHUB_WORKSPACE/mkbootimg/mkbootimg.py" >> $GITHUB_ENV
+
+    # --------------------------------------------------
+    # Kernel Source
+    # --------------------------------------------------
+    - name: Init kernel source
+      run: |
+        cd "$KERNEL_ROOT"
+        repo init \
+          -u https://android.googlesource.com/kernel/manifest \
+          -b common-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }} \
+          --depth=1
+        repo sync -c -j$(nproc) --no-tags --fail-fast
+
+    # --------------------------------------------------
+    # WildKSU
+    # --------------------------------------------------
+    - name: Add WildKSU
+      run: |
+        cd "$KERNEL_ROOT"
+        curl -LSs https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh | bash -s wild
+
+    # --------------------------------------------------
+    # SUSFS
+    # --------------------------------------------------
+    - name: Clone SUSFS
+      if: ${{ inputs.require_susfs }}
+      run: |
+        git clone https://gitlab.com/WildKernels/susfs4ksu.git
+
+    - name: Apply SUSFS core patch
+      if: ${{ inputs.require_susfs }}
+      working-directory: ${{ env.KERNEL_ROOT }}/common
+      run: |
+        PATCH="../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
+        patch -p1 < "$PATCH" || true
+        rm -f fs/proc/*.rej
+
+    # --------------------------------------------------
+    # Kernel config (PIXEL SAFE)
+    # --------------------------------------------------
+    - name: Kernel config
+      run: |
+        cd "$KERNEL_ROOT"
+        CFG="common/arch/arm64/configs/gki_defconfig"
+
+        add() { grep -q "^$1=" "$CFG" || echo "$1=$2" >> "$CFG"; }
+
+        # KernelSU
+        add CONFIG_KSU y
+        add CONFIG_KSU_MANUAL_HOOK y
+        add CONFIG_KSU_MANUAL_SU n
+
+        # SUSFS (PIXEL SAFE)
+        add CONFIG_KSU_SUSFS y
+        add CONFIG_TMPFS_XATTR y
+        add CONFIG_TMPFS_POSIX_ACL y
+        add CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT y
+        add CONFIG_KSU_SUSFS_SPOOF_UNAME y
+
+        # ❌ ABSOLUT AUS – sonst WLAN / Modem tot
+        add CONFIG_KSU_SUSFS_SUS_PATH n
+        add CONFIG_KSU_SUSFS_TRY_UMOUNT n
+        add CONFIG_KSU_SUSFS_SUS_MOUNT n
+        add CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT n
+        add CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT n
+        add CONFIG_KSU_SUSFS_ENABLE_LOG n
+
+        # Namespaces (Android required)
+        add CONFIG_PID_NS y
+        add CONFIG_IPC_NS y
+        add CONFIG_USER_NS y
+        add CONFIG_POSIX_MQUEUE y
+
+        # BBR (KEEP)
+        add CONFIG_TCP_CONG_ADVANCED y
+        add CONFIG_TCP_CONG_BBR y
+        add CONFIG_NET_SCH_FQ y
+
+        sed -i 's/check_defconfig//' common/build.config.gki
+        sed -i 's/-maybe-dirty//g; s/-dirty//g' common/scripts/setlocalversion
+
+    # --------------------------------------------------
+    # Build
+    # --------------------------------------------------
+    - name: Build kernel
+      run: |
+        cd "$KERNEL_ROOT"
+        sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64
+        sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64
+        sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64
+        tools/bazel build --config=fast //common:kernel_aarch64_dist
+
+    # --------------------------------------------------
+    # Boot image
+    # --------------------------------------------------
+    - name: Prepare AVB key
+      run: |
+        mkdir -p kernel-build-tools/linux-x86/share/avb
+        openssl genrsa -out kernel-build-tools/linux-x86/share/avb/testkey.pem 2048
+        echo "BOOT_SIGN_KEY_PATH=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/share/avb/testkey.pem" >> $GITHUB_ENV
+
+    - name: Build boot.img
+      run: |
+        cd "$KERNEL_ROOT/bazel-bin/common/kernel_aarch64"
+        lz4 -f Image Image.lz4
+        $MKBOOTIMG --header_version 4 --kernel Image --output boot.img
+        $AVBTOOL add_hash_footer \
+          --partition_name boot \
+          --partition_size $((64*1024*1024)) \
+          --image boot.img \
+          --algorithm SHA256_RSA2048 \
+          --key "$BOOT_SIGN_KEY_PATH"
+        cp boot.img "$GITHUB_WORKSPACE/${CONFIG}-boot.img"
+
+    - name: Upload boot image
+      uses: actions/upload-artifact@v4
+      with:
+        name: boot-${{ env.CONFIG }}
+        path: ${{ env.CONFIG }}-boot.img
