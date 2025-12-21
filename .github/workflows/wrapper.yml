@@ -1,0 +1,52 @@
+name: Generic GKI Kernel Wrapper
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_call:
+    inputs:
+      make_release:
+        required: true
+        type: boolean
+
+      android_version:
+        required: true
+        type: string
+        description: android12 | android13 | android14 | android15
+
+      kernel_version:
+        required: true
+        type: string
+        description: "5.10 | 5.15 | 6.1 | 6.6"
+
+      sub_level:
+        required: true
+        type: string
+
+      os_patch_level:
+        required: true
+        type: string
+
+      revision:
+        required: false
+        type: string
+
+      require_susfs:
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/gki-kernel.yml
+    secrets: inherit
+    with:
+      make_release: ${{ inputs.make_release }}
+      android_version: ${{ inputs.android_version }}
+      kernel_version: ${{ inputs.kernel_version }}
+      sub_level: ${{ inputs.sub_level }}
+      os_patch_level: ${{ inputs.os_patch_level }}
+      revision: ${{ inputs.revision }}
+      require_susfs: ${{ inputs.require_susfs }}
