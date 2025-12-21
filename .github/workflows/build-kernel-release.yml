@@ -5,7 +5,7 @@ permissions:
   actions: write
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       build_a12_510:
         description: "Build a12 5.10?"
