@@ -257,10 +257,15 @@ jobs:
           name: kernel-${{ env.CONFIG }}
           path: out/*
 
-        
-    # --------------------------------------------------
-    # Build Boot Images
-    # --------------------------------------------------
+      
+      - name: Prepare bootimgs directory
+        run: |
+          mkdir -p bootimgs
+          cp "$CONFIG/bazel-bin/common/kernel_aarch64/Image"* bootimgs/
+
+      # --------------------------------------------------
+      # Build Boot Images
+      # --------------------------------------------------
       - name: Build Boot Images
         working-directory: bootimgs
         run: |
@@ -288,12 +293,78 @@ jobs:
           $MKBOOTIMG --header_version 4 --kernel "$kernel" --output "$output" $RAMDISK_ARGS
           $AVBTOOL add_hash_footer --partition_name boot --partition_size $((64 * 1024 * 1024)) \
             --image "$output" --algorithm SHA256_RSA2048 --key "$BOOT_SIGN_KEY_PATH"
-          cp "./$output" "$GITHUB_WORKSPACE/${{ env.FILE_NAME }}-$output"
-         done
+            # --------------------------------------------------
+      # Collect Image
+      # --------------------------------------------------
+      - name: Collect Image
+        run: |
+          mkdir out
+          cp "$CONFIG/bazel-bin/common/kernel_aarch64/Image" out/
 
-    # --------------------------------------------------
-    # ANYKERNEL
-    # --------------------------------------------------
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ env.CONFIG }}
+          path: out/*
+
+      
+      - name: Prepare bootimgs directory
+        run: |
+          mkdir -p bootimgs
+          cp "$CONFIG/bazel-bin/common/kernel_aarch64/Image"* bootimgs/
+
+      # --------------------------------------------------
+      # Build Boot Images
+      # --------------------------------------------------
+      - name: Build Boot Images
+        working-directory: bootimgs
+        run: |
+          set -e
+
+          RAMDISK_ARGS=""
+          if [[ "${{ inputs.android_version }}" == "android12" ]]; then
+            GKI_URL="https://dl.google.com/android/gki/gki-certified-boot-android12-5.10-${{ inputs.os_patch_level }}_r1.zip"
+            FALLBACK_URL="https://dl.google.com/android/gki/gki-certified-boot-android12-5.10-2023-01_r1.zip"
+
+            if curl -sL -w "%{http_code}" "$GKI_URL" -o /dev/null | grep -q 200; then
+              curl -Lo gki-kernel.zip "$GKI_URL"
+            else
+              curl -Lo gki-kernel.zip "$FALLBACK_URL"
+            fi
+
+            unzip -q gki-kernel.zip && rm gki-kernel.zip
+            $UNPACK_BOOTIMG --boot_img="$(pwd)/boot-5.10.img"
+            RAMDISK_ARGS="--ramdisk out/ramdisk --os_version 12.0.0 --os_patch_level ${{ inputs.os_patch_level }}"
+          fi
+
+          # Create compressed kernels
+          gzip -n -k -f Image
+          lz4 -l Image Image.lz4
+
+          for suffix in "" ".gz" ".lz4"; do
+            kernel="Image${suffix}"
+            output="boot${suffix//./-}.img"
+            [ -z "$suffix" ] && output="boot.img"
+
+            $MKBOOTIMG \
+              --header_version 4 \
+              --kernel "$kernel" \
+              --output "$output" \
+              $RAMDISK_ARGS
+
+            $AVBTOOL add_hash_footer \
+              --partition_name boot \
+              --partition_size $((64 * 1024 * 1024)) \
+              --image "$output" \
+              --algorithm SHA256_RSA2048 \
+              --key "$BOOT_SIGN_KEY_PATH"
+
+            cp "$output" "$GITHUB_WORKSPACE/${CONFIG}-$output"
+          done
+
+      # --------------------------------------------------
+      # ANYKERNEL
+      # --------------------------------------------------
       - name: Prepare AnyKernel3
         run: |
           cp "$KERNEL_ROOT/bazel-bin/common/kernel_aarch64/Image" AnyKernel3/Image
