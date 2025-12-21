@@ -12,18 +12,6 @@ on:
         type: boolean
         default: true
 
-      kernelsu_variant:
-        required: true
-        type: string
-
-      kernelsu_branch:
-        required: true
-        type: string
-
-      kernelsu_branch_other:
-        required: false
-        type: string
-
 jobs:
   build-kernel-a12-5-10:
     strategy:
@@ -36,7 +24,6 @@ jobs:
 
     uses: ./.github/workflows/gki-kernel.yml
     secrets: inherit
-
     with:
       make_release: ${{ inputs.make_release }}
       android_version: "android12"
@@ -44,7 +31,3 @@ jobs:
       sub_level: ${{ matrix.sub_level }}
       os_patch_level: ${{ matrix.os_patch_level }}
       revision: ${{ matrix.revision }}
-
-      kernelsu_variant: ${{ inputs.kernelsu_variant }}
-      kernelsu_branch: ${{ inputs.kernelsu_branch }}
-      kernelsu_branch_other: ${{ inputs.kernelsu_branch_other }}
