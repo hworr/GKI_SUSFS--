@@ -1,4 +1,4 @@
-name: docker
+name: GKI Kernel (KernelSU-Next + SUSFS + BBR)
 
 permissions:
   contents: write
@@ -10,19 +10,23 @@ on:
       android_version:
         required: true
         type: string
+        default: android15
       kernel_version:
         required: true
         type: string
+        default: "6.6"
       sub_level:
         required: true
         type: string
+        default: "102"
       os_patch_level:
         required: true
         type: string
+        default: "2025-10"
       require_susfs:
         required: false
         type: boolean
-        default: false
+        default: true
 
 jobs:
   build-kernel:
@@ -51,7 +55,8 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install -y git curl python3 ccache repo lz4 openssl
+        sudo apt install -y \
+          git curl python3 ccache repo lz4 openssl
 
     # --------------------------------------------------
     # ENV
@@ -78,7 +83,6 @@ jobs:
           echo "PATH=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/bin:$PATH"
           echo "AVBTOOL=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/bin/avbtool"
           echo "MKBOOTIMG=$GITHUB_WORKSPACE/mkbootimg/mkbootimg.py"
-          echo "UNPACK_BOOTIMG=$GITHUB_WORKSPACE/mkbootimg/unpack_bootimg.py"
         } >> "$GITHUB_ENV"
 
     # --------------------------------------------------
@@ -112,11 +116,11 @@ jobs:
       run: |
         cd "$KERNEL_ROOT/common"
         PATCH="../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
-        patch -p1 < "$PATCH" || true
+        patch -p1 < "$PATCH"
         rm -f fs/proc/*.rej
 
     # --------------------------------------------------
-    # Kernel config (SAFE for Pixel / Android 15)
+    # Kernel config (CLEAN + SAFE + BBR)
     # --------------------------------------------------
     - name: Kernel config
       run: |
@@ -124,82 +128,46 @@ jobs:
         cd "$KERNEL_ROOT"
         CFG="common/arch/arm64/configs/gki_defconfig"
 
-        add() { grep -q "^$1=" "$CFG" || echo "$1=$2" >> "$CFG"; }
+        add_cfg() {
+          grep -q "^$1=" "$CFG" || echo "$1=$2" >> "$CFG"
+        }
 
-        add CONFIG_KSU y
-        add CONFIG_KSU_MANUAL_HOOK y
-        add CONFIG_KSU_MANUAL_SU n
+        # --- KernelSU ---
+        add_cfg CONFIG_KSU y
+        add_cfg CONFIG_KSU_MANUAL_HOOK y
+        add_cfg CONFIG_KSU_MANUAL_SU n
 
+        # --- SUSFS (SAFE for Pixel) ---
         if [[ "${{ inputs.require_susfs }}" == "true" ]]; then
-          add CONFIG_KSU_SUSFS y
-        else
-          add CONFIG_KSU_SUSFS n
+          add_cfg CONFIG_KSU_SUSFS y
+          add_cfg CONFIG_TMPFS_XATTR y
+          add_cfg CONFIG_TMPFS_POSIX_ACL y
+          add_cfg CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT y
+          add_cfg CONFIG_KSU_SUSFS_SUS_PATH y
+          add_cfg CONFIG_KSU_SUSFS_SPOOF_UNAME y
+
+          # disable dangerous umount logic
+          add_cfg CONFIG_KSU_SUSFS_TRY_UMOUNT n
+          add_cfg CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT n
+          add_cfg CONFIG_KSU_SUSFS_SUS_MOUNT n
+          add_cfg CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT n
+          add_cfg CONFIG_KSU_SUSFS_ENABLE_LOG n
         fi
 
-        # SUSFS core
-        add_cfg CONFIG_KSU_SUSFS y
-        
-        # REQUIRED infra
-        add_cfg CONFIG_TMPFS_XATTR y
-        add_cfg CONFIG_TMPFS_POSIX_ACL y
-        
-        # SAFE features
-        add_cfg CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT y
-        add_cfg CONFIG_KSU_SUSFS_SUS_PATH y
-        add_cfg CONFIG_KSU_SUSFS_SPOOF_UNAME y
-        
-        # ❌ HARD DISABLE (Pixel modem / WLAN killers)
-        add_cfg CONFIG_KSU_SUSFS_TRY_UMOUNT n
-        add_cfg CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT n
-        add_cfg CONFIG_KSU_SUSFS_SUS_MOUNT n
-        add_cfg CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT n
-        add_cfg CONFIG_KSU_SUSFS_ENABLE_LOG n
-        add_cfg CONFIG_KSU_SUSFS_OPEN_REDIRECT n
-
-        # Namespaces
+        # --- Namespaces (Android required) ---
         add_cfg CONFIG_PID_NS y
         add_cfg CONFIG_IPC_NS y
         add_cfg CONFIG_USER_NS y
-        add_cfg CONFIG_NET_NS y
-        add_cfg CONFIG_UTS_NS y
-        
-        # Cgroups
-        add_cfg CONFIG_CGROUPS y
-        add_cfg CONFIG_CGROUP_DEVICE y
-        add_cfg CONFIG_CGROUP_CPU y
-        add_cfg CONFIG_CGROUP_PIDS y
-        add_cfg CONFIG_CGROUP_SCHED y
-        add_cfg CONFIG_CGROUP_BPF y
-        
-        # Filesystems
-        add_cfg CONFIG_OVERLAY_FS y
-        add_cfg CONFIG_TMPFS y
-        
-        # Networking
-        add_cfg CONFIG_VETH y
-        add_cfg CONFIG_BRIDGE y
-        add_cfg CONFIG_BRIDGE_NETFILTER y
-        add_cfg CONFIG_NETFILTER y
-        add_cfg CONFIG_IP_NF_NAT y
-        add_cfg CONFIG_IP_NF_TARGET_MASQUERADE y
-        add_cfg CONFIG_IPV6 y
+        add_cfg CONFIG_POSIX_MQUEUE y
 
-         # Add BBR Config
-        add_cfg CONFIG_CGROUP_SCHED y
-          echo "CONFIG_TCP_CONG_ADVANCED=y" >> ./common/arch/arm64/configs/gki_defconfig
-        add_cfg CONFIG_CGROUP_BPF y
-          echo "CONFIG_TCP_CONG_BBR=y" >> ./common/arch/arm64/configs/gki_defconfig
-        
-          echo "CONFIG_NET_SCH_FQ=y" >> ./common/arch/arm64/configs/gki_defconfig
-        # Filesystems
-          echo "CONFIG_TCP_CONG_BIC=n" >> ./common/arch/arm64/configs/gki_defconfig
-        add_cfg CONFIG_OVERLAY_FS y
-          echo "CONFIG_TCP_CONG_WESTWOOD=n" >> ./common/arch/arm64/configs/gki_defconfig
-        add_cfg CONFIG_TMPFS y
-          echo "CONFIG_TCP_CONG_HTCP=n" >> ./common/arch/arm64/configs/gki_defconfig
+        # --- BBR (KEEP) ---
+        add_cfg CONFIG_TCP_CONG_ADVANCED y
+        add_cfg CONFIG_TCP_CONG_BBR y
+        add_cfg CONFIG_NET_SCH_FQ y
 
-        sed -i 's/check_defconfig//' common/build.config.gki
-        sed -i 's/-maybe-dirty//g; s/-dirty//g' common/scripts/setlocalversion
+        # cleanup
+        sed -i 's/check_defconfig//' common/build.config.gki || true
+        sed -i 's/-maybe-dirty//g; s/-dirty//g' common/scripts/setlocalversion || true
 
     # --------------------------------------------------
     # Build
@@ -213,7 +181,7 @@ jobs:
         tools/bazel build --config=fast //common:kernel_aarch64_dist
 
     # --------------------------------------------------
-    # Boot images
+    # Boot Images
     # --------------------------------------------------
     - name: Prepare AVB key
       run: |
@@ -233,8 +201,12 @@ jobs:
           [ -z "$s" ] && o="boot.img"
 
           $MKBOOTIMG --header_version 4 --kernel "$k" --output "$o"
-          $AVBTOOL add_hash_footer --partition_name boot --partition_size $((64*1024*1024)) \
-            --image "$o" --algorithm SHA256_RSA2048 --key "$BOOT_SIGN_KEY_PATH"
+          $AVBTOOL add_hash_footer \
+            --partition_name boot \
+            --partition_size $((64*1024*1024)) \
+            --image "$o" \
+            --algorithm SHA256_RSA2048 \
+            --key "$BOOT_SIGN_KEY_PATH"
 
           cp "$o" "$GITHUB_WORKSPACE/${CONFIG}-$o"
         done
@@ -244,16 +216,3 @@ jobs:
       with:
         name: boot-images-${{ env.CONFIG }}
         path: ${{ env.CONFIG }}-boot*.img
-
-
-      # --------------------------------------------------
-      # ANYKERNEL
-      # --------------------------------------------------
-    - name: Prepare AnyKernel3
-      run: |
-          cp "$KERNEL_ROOT/bazel-bin/common/kernel_aarch64/Image" AnyKernel3/Image
-    - name: Upload AnyKernel3
-      uses: actions/upload-artifact@v4
-      with:
-          name: AnyKernel3
-          path: AnyKernel3/**
