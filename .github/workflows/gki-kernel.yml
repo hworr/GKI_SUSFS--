@@ -219,16 +219,30 @@ jobs:
           echo "CONFIG_KSU_MANUAL_SU=n" >> $DEFCONFIG
 
           if [ "${{ inputs.require_susfs }}" = "true" ]; then
-            echo "CONFIG_KSU_SUSFS=y" >> $DEFCONFIG
+          echo "CONFIG_KSU_SUSFS=y" >> $DEFCONFIG
           else
-            echo "CONFIG_KSU_SUSFS=n" >> $DEFCONFIG
+          echo "CONFIG_KSU_SUSFS=n" >> $DEFCONFIG
           fi
 
           # REQUIRED for SUSFS
           echo "CONFIG_TMPFS_XATTR=y" >> $DEFCONFIG
           echo "CONFIG_TMPFS_POSIX_ACL=y" >> $DEFCONFIG
 
+          # SAFE SUSFS (Pixel / A15)
+          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> $DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> $DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> $DEFCONFIG
+
+          # 🔥 DISABLE DANGEROUS UMOUNT FEATURES
+          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=n" >> $DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=n" >> $DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=n" >> $DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=n" >> $DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=n" >> $DEFCONFIG
+
           sed -i 's/check_defconfig//' common/build.config.gki
+          sed -i 's/-maybe-dirty//g' common/scripts/setlocalversion
+          sed -i 's/-dirty//g' common/scripts/setlocalversion
 
       # --------------------------------------------------
       # Build
