@@ -65,203 +65,190 @@ jobs:
           sudo apt update
           sudo apt install -y git curl python3 ccache repo
 
-    # --------------------------------------------------
-    # ENV
-    # --------------------------------------------------
+      # --------------------------------------------------
+      # ENV
+      # --------------------------------------------------
       - name: Set environment variables
         run: |
           CONFIG="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}"
           KERNEL_ROOT="$GITHUB_WORKSPACE/$CONFIG"
           {
-          echo "CONFIG=$CONFIG"
-          echo "KERNEL_ROOT=$KERNEL_ROOT"
-          echo "DEFCONFIG=$KERNEL_ROOT/common/arch/arm64/configs/gki_defconfig"
-          echo "KERNEL_PATCHES=$GITHUB_WORKSPACE/kernel_patches"
-          echo "ANYKERNEL3=$GITHUB_WORKSPACE/AnyKernel3"
-          echo "SUSFS4KSU=$GITHUB_WORKSPACE/susfs4ksu"
-          } >> $GITHUB_ENV
+            echo "CONFIG=$CONFIG"
+            echo "KERNEL_ROOT=$KERNEL_ROOT"
+            echo "DEFCONFIG=$KERNEL_ROOT/common/arch/arm64/configs/gki_defconfig"
+            echo "KERNEL_PATCHES=$GITHUB_WORKSPACE/kernel_patches"
+            echo "ANYKERNEL3=$GITHUB_WORKSPACE/AnyKernel3"
+            echo "SUSFS4KSU=$GITHUB_WORKSPACE/susfs4ksu"
+          } >> "$GITHUB_ENV"
           mkdir -p "$KERNEL_ROOT"
-    # --------------------------------------------------
-    # TOOLS
-    # --------------------------------------------------
+
+      # --------------------------------------------------
+      # TOOLS
+      # --------------------------------------------------
       - name: Setup build tools
         run: |
           git clone https://android.googlesource.com/kernel/prebuilts/build-tools kernel-build-tools
           git clone https://android.googlesource.com/platform/system/tools/mkbootimg mkbootimg
-          echo "PATH=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/bin:$PATH" >> $GITHUB_ENV
-          echo "AVBTOOL=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/bin/avbtool" >> $GITHUB_ENV
-          echo "MKBOOTIMG=$GITHUB_WORKSPACE/mkbootimg/mkbootimg.py" >> $GITHUB_ENV
+          {
+            echo "PATH=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/bin:$PATH"
+            echo "AVBTOOL=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/bin/avbtool"
+            echo "MKBOOTIMG=$GITHUB_WORKSPACE/mkbootimg/mkbootimg.py"
+          } >> "$GITHUB_ENV"
+
       - name: Install repo tool
         run: |
           mkdir -p git-repo
           curl https://storage.googleapis.com/git-repo-downloads/repo > git-repo/repo
           chmod +x git-repo/repo
-          echo "REPO=$GITHUB_WORKSPACE/git-repo/repo" >> $GITHUB_ENV
+          echo "REPO=$GITHUB_WORKSPACE/git-repo/repo" >> "$GITHUB_ENV"
 
-      
       # --------------------------------------------------
       # CONFIG
       # --------------------------------------------------
       - name: Set CONFIG
         run: |
           CONFIG="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}"
-          echo "CONFIG=$CONFIG" >> $GITHUB_ENV
+          echo "CONFIG=$CONFIG" >> "$GITHUB_ENV"
           echo "Using CONFIG=$CONFIG"
 
       - name: Setup ccache
         run: |
           ccache --max-size=2G
-          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
 
       # --------------------------------------------------
       # Kernel Source
       # --------------------------------------------------
       - name: Init kernel source
         run: |
-          rm -rf "$CONFIG"
-          mkdir -p "$CONFIG"
-          cd "$CONFIG"
-
-          BRANCH="android15-6.6-2025-10"
-          repo init --depth=1 \
-          -u https://android.googlesource.com/kernel/manifest \
-          -b common-$BRANCH
-
-          repo sync -c -j$(nproc) --no-tags
-      # --------------------------------------------------
-      # KernelSU NEXT (OFFIZIELL)
-      # --------------------------------------------------
-      - name: Add KernelSU-Next
-        run: |
-          cd "$CONFIG"
-          echo "Adding KernelSU-Next..."
-          curl -LSs https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh | bash -
-
-    # --------------------------------------------------
-    # DEPENDENCIES
-    # --------------------------------------------------
-      - name: Clone dependencies
-        run: |
-          git clone https://github.com/WildKernels/kernel_patches.git
-          git clone https://github.com/WildKernels/AnyKernel3.git
-          git clone https://gitlab.com/WildKernels/susfs4ksu.git -b gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}
-    # --------------------------------------------------
-    # KERNEL SOURCE
-    # --------------------------------------------------
-      - name: Init kernel source
-        run: |
+          CONFIG="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}"
           mkdir -p "$CONFIG"
           cd "$CONFIG"
 
           BRANCH="common-android15-6.6-2025-10"
 
           repo init \
-          -u https://android.googlesource.com/kernel/manifest \
-          -b "$BRANCH" \
-          --depth=1
+            -u https://android.googlesource.com/kernel/manifest \
+            -b "$BRANCH" \
+            --depth=1
 
-          repo sync -c -j$(nproc) --no-tags --fail-fast
-    # --------------------------------------------------
-    # WildKSU
-    # --------------------------------------------------
-    #  - name: Add WildKSU
-    #    working-directory: ${{ env.KERNEL_ROOT }}
-    #    run: |
-    #      curl -LSs https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh | bash -s wild
-    # --------------------------------------------------
-    # SUSFS CORE (REQUIRED)
-    # --------------------------------------------------
+          repo sync -c -j"$(nproc)" --no-tags --fail-fast
+
+      # --------------------------------------------------
+      # KernelSU NEXT (OFFIZIELL)
+      # --------------------------------------------------
+      - name: Add KernelSU-Next
+        run: |
+          CONFIG="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}"
+          cd "$CONFIG"
+          echo "Adding KernelSU-Next..."
+          curl -LSs https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh | bash -
+
+      # --------------------------------------------------
+      # DEPENDENCIES
+      # --------------------------------------------------
+      - name: Clone dependencies
+        run: |
+          git clone https://github.com/WildKernels/kernel_patches.git
+          git clone https://github.com/WildKernels/AnyKernel3.git
+          git clone https://gitlab.com/WildKernels/susfs4ksu.git -b gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}
+
+      # --------------------------------------------------
+      # SUSFS CORE (REQUIRED)
+      # --------------------------------------------------
       - name: Apply SUSFS core patch (REQUIRED)
         working-directory: ${{ env.KERNEL_ROOT }}/common
         run: |
           set -e
           PATCH="$SUSFS4KSU/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
           if [ ! -f "$PATCH" ]; then
-          echo "❌ SUSFS core patch missing: $PATCH"
-          exit 1
+            echo "❌ SUSFS core patch missing: $PATCH"
+            exit 1
           fi
           echo "==> Applying SUSFS core patch"
           patch -p1 < "$PATCH" || true
           rm -f fs/proc/*.rej
-    # --------------------------------------------------
-    # SUSFS FIX PATCHES (OPTIONAL / SAFE)
-    # --------------------------------------------------
+
+      # --------------------------------------------------
+      # SUSFS FIX PATCHES (OPTIONAL / SAFE)
+      # --------------------------------------------------
       - name: Apply SUSFS fix patches (optional)
         working-directory: ${{ env.KERNEL_ROOT }}/common
         run: |
           set -e
           FIX="$KERNEL_PATCHES/wild/susfs_fix_patches/v2.0.0"
           apply_optional() {
-          local p="$1"
-          [ -f "$p" ] || return 0
-          for lvl in 0 1 2; do
-            if patch -p$lvl --dry-run < "$p" >/dev/null 2>&1; then
-              patch -p$lvl < "$p"
-              echo "✔ applied $(basename "$p")"
-              return
-            fi
-          done
-          echo "⚠ skipped $(basename "$p")"
+            local p="$1"
+            [ -f "$p" ] || return 0
+            for lvl in 0 1 2; do
+              if patch -p"$lvl" --dry-run < "$p" >/dev/null 2>&1; then
+                patch -p"$lvl" < "$p"
+                echo "✔ applied $(basename "$p")"
+                return
+              fi
+            done
+            echo "⚠ skipped $(basename "$p")"
           }
           apply_optional "$FIX/fix_task_mmu.c.patch"
           apply_optional "$FIX/1_fix_base.c.patch"
           rm -f fs/proc/*.rej
+
       # --------------------------------------------------
       # Kernel config
       # --------------------------------------------------
       - name: Kernel config
         run: |
-        cd "$CONFIG"
-        CONFIG_FILE="./common/arch/arm64/configs/gki_defconfig"
+          CONFIG="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}"
+          cd "$CONFIG"
+          CONFIG_FILE="./common/arch/arm64/configs/gki_defconfig"
 
-            echo "CONFIG_KSU=y" >> $DEFCONFIG
-            echo "CONFIG_KSU_MANUAL_HOOK=y" >> $DEFCONFIG
-            echo "CONFIG_KSU_MANUAL_SU=n" >> $DEFCONFIG
+          echo "CONFIG_KSU=y" >> "$CONFIG_FILE"
+          echo "CONFIG_KSU_MANUAL_HOOK=y" >> "$CONFIG_FILE"
+          echo "CONFIG_KSU_MANUAL_SU=n" >> "$CONFIG_FILE"
 
-            if [ "${{ inputs.require_susfs }}" = "true" ]; then
-            echo "CONFIG_KSU_SUSFS=y" >> $DEFCONFIG
-            else
-            echo "CONFIG_KSU_SUSFS=n" >> $DEFCONFIG
-            fi
+          if [ "${{ inputs.require_susfs }}" = "true" ]; then
+            echo "CONFIG_KSU_SUSFS=y" >> "$CONFIG_FILE"
+          else
+            echo "CONFIG_KSU_SUSFS=n" >> "$CONFIG_FILE"
+          fi
 
-            # REQUIRED for SUSFS
-            echo "CONFIG_TMPFS_XATTR=y" >> $DEFCONFIG
-            echo "CONFIG_TMPFS_POSIX_ACL=y" >> $DEFCONFIG
+          # REQUIRED for SUSFS
+          echo "CONFIG_TMPFS_XATTR=y" >> "$CONFIG_FILE"
+          echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$CONFIG_FILE"
 
-            # SAFE SUSFS (Pixel / A15)
-            echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> $DEFCONFIG
-            echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> $DEFCONFIG
-            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> $DEFCONFIG
+          # SAFE SUSFS (Pixel / A15)
+          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> "$CONFIG_FILE"
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "$CONFIG_FILE"
+          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> "$CONFIG_FILE"
 
-            # 🔥 DISABLE DANGEROUS UMOUNT FEATURES
-            echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=n" >> $DEFCONFIG
-            echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=n" >> $DEFCONFIG
-            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=n" >> $DEFCONFIG
-            echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=n" >> $DEFCONFIG
-            echo "CONFIG_KSU_SUSFS_ENABLE_LOG=n" >> $DEFCONFIG
-          
-            echo "CONFIG_PID_NS=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IPC_NS=y" >> "$CONFIG_FILE"
-            echo "CONFIG_USER_NS=y" >> "$CONFIG_FILE"
-          
-            # Enable CGROUP_DEVICE only for android14-6.6 (with patch applied)
-            if [ "${{ inputs.android_version }}" = "android15" ] && [ "${{ inputs.kernel_version }}" = "6.6" ]; then
+          # 🔥 DISABLE DANGEROUS UMOUNT FEATURES
+          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=n" >> "$CONFIG_FILE"
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=n" >> "$CONFIG_FILE"
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=n" >> "$CONFIG_FILE"
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=n" >> "$CONFIG_FILE"
+          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=n" >> "$CONFIG_FILE"
+
+          echo "CONFIG_PID_NS=y" >> "$CONFIG_FILE"
+          echo "CONFIG_IPC_NS=y" >> "$CONFIG_FILE"
+          echo "CONFIG_USER_NS=y" >> "$CONFIG_FILE"
+
+          # Enable CGROUP_DEVICE only for android15-6.6 (with patch applied)
+          if [ "${{ inputs.android_version }}" = "android15" ] && [ "${{ inputs.kernel_version }}" = "6.6" ]; then
             echo "CONFIG_CGROUP_DEVICE=y" >> "$CONFIG_FILE"
-            fi
-            echo "CONFIG_POSIX_MQUEUE=y" >> "$CONFIG_FILE" 
-            #echo "CONFIG_BRIDGE_NETFILTER=y" >> "$CONFIG_FILE"
-            #echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y" >> "$CONFIG_FILE"
-            #echo "CONFIG_NETFILTER_XT_MATCH_IPVS=y" >> "$CONFIG_FILE"
+          fi
 
-            sed -i 's/check_defconfig//' common/build.config.gki
-            sed -i 's/-maybe-dirty//g' common/scripts/setlocalversion
-            sed -i 's/-dirty//g' common/scripts/setlocalversion
+          echo "CONFIG_POSIX_MQUEUE=y" >> "$CONFIG_FILE"
+
+          sed -i 's/check_defconfig//' common/build.config.gki
+          sed -i 's/-maybe-dirty//g' common/scripts/setlocalversion
+          sed -i 's/-dirty//g' common/scripts/setlocalversion
 
       # --------------------------------------------------
       # Build
       # --------------------------------------------------
       - name: Build kernel
         run: |
+          CONFIG="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}"
           cd "$CONFIG"
 
           sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64
@@ -275,7 +262,8 @@ jobs:
       # --------------------------------------------------
       - name: Collect Image
         run: |
-          mkdir out
+          CONFIG="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}"
+          mkdir -p out
           cp "$CONFIG/bazel-bin/common/kernel_aarch64/Image" out/
 
       - name: Upload artifact
@@ -284,9 +272,9 @@ jobs:
           name: kernel-${{ env.CONFIG }}
           path: out/*
 
-      
       - name: Prepare bootimgs directory
         run: |
+          CONFIG="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}"
           mkdir -p bootimgs
           cp "$CONFIG/bazel-bin/common/kernel_aarch64/Image"* bootimgs/
 
@@ -297,9 +285,8 @@ jobs:
         run: |
           mkdir -p kernel-build-tools/linux-x86/share/avb
           openssl genrsa -out kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem 2048
-          echo "BOOT_SIGN_KEY_PATH=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem" >> $GITHUB_ENV
+          echo "BOOT_SIGN_KEY_PATH=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem" >> "$GITHUB_ENV"
 
-      
       - name: Build Boot Images
         working-directory: bootimgs
         run: |
@@ -317,13 +304,14 @@ jobs:
             fi
 
             unzip -q gki-kernel.zip && rm gki-kernel.zip
-            $UNPACK_BOOTIMG --boot_img="$(pwd)/boot-5.10.img"
+            # UNPACK_BOOTIMG muss irgendwo definiert werden, sonst knallt es hier:
+            # $UNPACK_BOOTIMG --boot_img="$(pwd)/boot-5.10.img"
             RAMDISK_ARGS="--ramdisk out/ramdisk --os_version 12.0.0 --os_patch_level ${{ inputs.os_patch_level }}"
           fi
-          
+
           gzip -n -k -f Image
           lz4 -f Image Image.lz4
-          
+
           for suffix in "" ".gz" ".lz4"; do
             kernel="Image${suffix}"
             output="boot${suffix//./-}.img"
@@ -342,21 +330,20 @@ jobs:
               --algorithm SHA256_RSA2048 \
               --key "$BOOT_SIGN_KEY_PATH"
 
-            cp "$output" "$GITHUB_WORKSPACE/${CONFIG}-$output"
+            cp "$output" "$GITHUB_WORKSPACE/${CONFIG}-${output}"
           done
 
-        # --------------------------------------------------
-        # Upload boot.img files
-        # --------------------------------------------------
+      # --------------------------------------------------
+      # Upload boot.img files
+      # --------------------------------------------------
       - name: Upload boot images
         uses: actions/upload-artifact@v4
         with:
           name: boot-images-${{ env.CONFIG }}
           path: |
-           ${{ env.CONFIG }}-boot.img
-           ${{ env.CONFIG }}-boot-gz.img
-           ${{ env.CONFIG }}-boot-lz4.img
-
+            ${{ env.CONFIG }}-boot.img
+            ${{ env.CONFIG }}-boot-gz.img
+            ${{ env.CONFIG }}-boot-lz4.img
 
       # --------------------------------------------------
       # ANYKERNEL
@@ -364,6 +351,7 @@ jobs:
       - name: Prepare AnyKernel3
         run: |
           cp "$KERNEL_ROOT/bazel-bin/common/kernel_aarch64/Image" AnyKernel3/Image
+
       - name: Upload AnyKernel3
         uses: actions/upload-artifact@v4
         with:
