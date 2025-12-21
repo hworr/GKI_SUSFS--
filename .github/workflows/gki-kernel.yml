@@ -6,37 +6,44 @@ permissions:
 on:
   workflow_call:
     inputs:
-      os_patch_level:
-        required: true
-        type: string
-      require_susfs:
-        required: false
-        type: boolean
       make_release:
         required: true
         type: boolean
         default: true
+
       android_version:
         required: true
         type: string
+
       kernel_version:
         required: true
         type: string
+
       sub_level:
         required: true
         type: string
-         os_patch_level:
-         required: true
-         type: string
+
+      os_patch_level:
+        required: true
+        type: string
+
+      require_susfs:
+        required: false
+        type: boolean
+        default: false
+
       kernelsu_variant:
         required: true
         type: string
+
       kernelsu_branch:
         required: true
         type: string
+
       kernelsu_branch_other:
         required: false
         type: string
+
       revision:
         required: false
         type: string
