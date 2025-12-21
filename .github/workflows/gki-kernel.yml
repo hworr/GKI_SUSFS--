@@ -161,10 +161,10 @@ jobs:
             fi
           done
           echo "⚠ skipped $(basename "$p")"
-        }
-        apply_optional "$FIX/fix_task_mmu.c.patch"
-        apply_optional "$FIX/1_fix_base.c.patch"
-        rm -f fs/proc/*.rej
+          }
+          apply_optional "$FIX/fix_task_mmu.c.patch"
+          apply_optional "$FIX/1_fix_base.c.patch"
+          rm -f fs/proc/*.rej
       # --------------------------------------------------
       # Kernel config
       # --------------------------------------------------
