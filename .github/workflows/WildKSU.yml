@@ -266,6 +266,12 @@ jobs:
       # --------------------------------------------------
       # Build Boot Images
       # --------------------------------------------------
+      - name: Prepare AVB test key
+        run: |
+          mkdir -p kernel-build-tools/linux-x86/share/avb
+          openssl genrsa -out kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem 2048
+          echo "BOOT_SIGN_KEY_PATH=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem" >> $GITHUB_ENV
+
       - name: Build Boot Images
         working-directory: bootimgs
         run: |
