@@ -12,61 +12,12 @@ on:
         type: boolean
         default: true
 
-      build_a12:
-        description: "Build Android 12 (5.10)"
-        type: boolean
-        default: false
-
-      build_a13:
-        description: "Build Android 13 (5.15)"
-        type: boolean
-        default: false
-
-      build_a14:
-        description: "Build Android 14 (6.1)"
-        type: boolean
-        default: true
-
       build_a15:
         description: "Build Android 15 (6.6 + SUSFS)"
         type: boolean
         default: false
 
 jobs:
-  android12:
-    if: ${{ inputs.build_a12 }}
-    uses: ./.github/workflows/kernel-wrapper.yml
-    secrets: inherit
-    with:
-      make_release: ${{ inputs.make_release }}
-      android_version: android12
-      kernel_version: "5.10"
-      sub_level: "237"
-      os_patch_level: "2025-06"
-      revision: "r1"
-
-  android13:
-    if: ${{ inputs.build_a13 }}
-    uses: ./.github/workflows/kernel-wrapper.yml
-    secrets: inherit
-    with:
-      make_release: ${{ inputs.make_release }}
-      android_version: android13
-      kernel_version: "5.15"
-      sub_level: "185"
-      os_patch_level: "2025-07"
-
-  android14:
-    if: ${{ inputs.build_a14 }}
-    uses: ./.github/workflows/kernel-wrapper.yml
-    secrets: inherit
-    with:
-      make_release: ${{ inputs.make_release }}
-      android_version: android14
-      kernel_version: "6.1"
-      sub_level: "98"
-      os_patch_level: "2025-09"
-
   android15:
     if: ${{ inputs.build_a15 }}
     uses: ./.github/workflows/kernel-wrapper.yml
@@ -75,6 +26,6 @@ jobs:
       make_release: ${{ inputs.make_release }}
       android_version: android15
       kernel_version: "6.6"
-      sub_level: "98"
-      os_patch_level: "2025-09"
+      sub_level: "102"
+      os_patch_level: "2025-10"
       require_susfs: true   # ✅ HIER ändern
