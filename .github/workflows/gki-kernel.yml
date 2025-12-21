@@ -111,21 +111,22 @@ jobs:
         run: |
           git clone https://github.com/ShirkNeko/susfs4ksu.git
 
-      - name: Apply SUSFS patches
-        if: ${{ inputs.require_susfs == true }}
+      - name: Apply SUSFS patches (Android 15 / 6.6)
+        if: ${{ inputs.require_susfs }}
         run: |
           cd "$CONFIG"
-          PATCH="50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
-          if [ ! -f "../susfs4ksu/kernel_patches/$PATCH" ]; then
-          echo "❌ SUSFS patch not available for this kernel, skipping"
-          exit 0
-          fi
-          cp ../susfs4ksu/kernel_patches/$PATCH common/
-          cp ../susfs4ksu/kernel_patches/fs/* common/fs/
-          cp ../susfs4ksu/kernel_patches/include/linux/* common/include/linux/
-          
+
+          SUSFS_DIR="../susfs4ksu/kernel_patches/gki-android15-6.6"
+
+          cp $SUSFS_DIR/*.patch common/
+          cp -r $SUSFS_DIR/fs/* common/fs/
+          cp -r $SUSFS_DIR/include/linux/* common/include/linux/
+
           cd common
-          patch -p1 --fuzz=3 < $PATCH
+          for p in *.patch; do
+          echo "Applying $p"
+          patch -p1 --fuzz=3 < "$p"
+          done
 
       # -------------------------------
       # Kernel config
