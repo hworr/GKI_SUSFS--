@@ -316,10 +316,10 @@ jobs:
           DEFCONFIG="${DEFCONFIG:-common/arch/arm64/configs/gki_defconfig}"
 
           cat >> "$DEFCONFIG" << 'EOF'
-CONFIG_RFKILL=y
-CONFIG_CFG80211=y
-CONFIG_MAC80211=y
-EOF
+            CONFIG_RFKILL=y
+            CONFIG_CFG80211=y
+            CONFIG_MAC80211=y
+            EOF
 
           # Example of cleaning modules list; adjust paths/patterns as desired
           sed -i \
@@ -335,21 +335,21 @@ EOF
           DEFCONFIG="${DEFCONFIG:-common/arch/arm64/configs/gki_defconfig}"
 
           cat >> "$DEFCONFIG" << 'EOF'
-CONFIG_SND=y
-CONFIG_SND_DRIVERS=y
-CONFIG_SND_PCM=y
-CONFIG_SND_TIMER=y
-CONFIG_SND_DYNAMIC_MINORS=y
-CONFIG_SND_PROC_FS=y
-CONFIG_SND_ALOOP=m
-CONFIG_USB_GADGET=y
-CONFIG_CONFIGFS_FS=y
-CONFIG_USB_CONFIGFS=y
-CONFIG_USB_LIBCOMPOSITE=m
-CONFIG_USB_AUDIO=m
-CONFIG_USB_CONFIGFS_F_UAC1=y
-CONFIG_USB_CONFIGFS_F_UAC2=y
-EOF
+          CONFIG_SND=y
+          CONFIG_SND_DRIVERS=y
+          CONFIG_SND_PCM=y
+          CONFIG_SND_TIMER=y
+          CONFIG_SND_DYNAMIC_MINORS=y
+          CONFIG_SND_PROC_FS=y
+          CONFIG_SND_ALOOP=m
+          CONFIG_USB_GADGET=y
+          CONFIG_CONFIGFS_FS=y
+          CONFIG_USB_CONFIGFS=y
+          CONFIG_USB_LIBCOMPOSITE=m
+          CONFIG_USB_AUDIO=m
+          CONFIG_USB_CONFIGFS_F_UAC1=y
+          CONFIG_USB_CONFIGFS_F_UAC2=y
+          EOF
 
           echo "drivers/usb/gadget/legacy/g_audio.ko" >> common/android/gki_aarch64_modules
           echo "sound/drivers/snd-aloop.ko" >> common/android/gki_aarch64_modules
