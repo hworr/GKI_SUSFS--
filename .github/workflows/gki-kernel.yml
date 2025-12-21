@@ -10,7 +10,6 @@ on:
       make_release:
         required: true
         type: boolean
-        default: true
 
       android_version:
         required: true
@@ -26,6 +25,22 @@ on:
 
       os_patch_level:
         required: true
+        type: string
+
+      kernelsu_variant:          # ✅ HINZUFÜGEN
+        required: true
+        type: string
+
+      kernelsu_branch:
+        required: true
+        type: string
+
+      kernelsu_branch_other:
+        required: false
+        type: string
+
+      revision:                  # ✅ HINZUFÜGEN
+        required: false
         type: string
 
       require_susfs:
