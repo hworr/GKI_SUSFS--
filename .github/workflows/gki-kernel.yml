@@ -4,8 +4,14 @@ permissions:
   actions: write # Allows triggering actions
 
 on:
-  workflow_call: # This allows this workflow to be called from another workflow
+  workflow_call:
     inputs:
+      os_patch_level:
+        required: true
+        type: string
+      require_susfs:
+        required: false
+        type: boolean
       make_release:
         required: true
         type: boolean
@@ -19,9 +25,9 @@ on:
       sub_level:
         required: true
         type: string
-      os_patch_level:
-        required: true
-        type: string
+         os_patch_level:
+         required: true
+         type: string
       kernelsu_variant:
         required: true
         type: string
