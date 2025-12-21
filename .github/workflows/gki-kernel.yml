@@ -318,6 +318,18 @@ jobs:
             cp "$output" "$GITHUB_WORKSPACE/${CONFIG}-$output"
           done
 
+        # --------------------------------------------------
+        # Upload boot.img files
+        # --------------------------------------------------
+      - name: Upload boot images
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-images-${{ env.CONFIG }}
+          path: |
+           ${{ env.CONFIG }}-boot.img
+           ${{ env.CONFIG }}-boot-gz.img
+           ${{ env.CONFIG }}-boot-lz4.img
+
 
       # --------------------------------------------------
       # ANYKERNEL
