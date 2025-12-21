@@ -10,7 +10,6 @@ on:
       make_release:
         required: true
         type: boolean
-        default: true
       kernelsu_variant:
         required: true
         type: string
@@ -20,13 +19,13 @@ on:
       kernelsu_branch_other:
         required: false
         type: string
-      require_susfs:              # ✅ HINZUGEFÜGT
+      require_susfs:
         required: false
         type: boolean
         default: true
 
 jobs:
-  build-kernel-a15-6-6-kernelsu-susfs:
+  build-kernel-a15-6-6:
     strategy:
       fail-fast: false
       matrix:
@@ -38,12 +37,14 @@ jobs:
     secrets: inherit
 
     with:
-      make_release: ${{ inputs.make_release }}
       android_version: "android15"
       kernel_version: "6.6"
       sub_level: ${{ matrix.sub_level }}
       os_patch_level: ${{ matrix.os_patch_level }}
+
+      make_release: ${{ inputs.make_release }}
       kernelsu_variant: ${{ inputs.kernelsu_variant }}
       kernelsu_branch: ${{ inputs.kernelsu_branch }}
       kernelsu_branch_other: ${{ inputs.kernelsu_branch_other }}
-      require_susfs: ${{ inputs.require_susfs }}   # ✅ WEITERGEREICHT
+
+      require_susfs: ${{ inputs.require_susfs }}
