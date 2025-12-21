@@ -1,4 +1,4 @@
-name: GKI Kernel Build (KernelSU Next)
+name: GKI Kernel Build (KernelSU-Next)
 
 permissions:
   contents: write
@@ -27,19 +27,7 @@ on:
         required: true
         type: string
 
-      kernelsu_variant:          # ✅ HINZUFÜGEN
-        required: true
-        type: string
-
-      kernelsu_branch:
-        required: true
-        type: string
-
-      kernelsu_branch_other:
-        required: false
-        type: string
-
-      revision:                  # ✅ HINZUFÜGEN
+      revision:
         required: false
         type: string
 
@@ -58,6 +46,9 @@ jobs:
       CCACHE_HARDLINK: "true"
 
     steps:
+      # -------------------------------
+      # Space & Dependencies
+      # -------------------------------
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
@@ -74,16 +65,23 @@ jobs:
           sudo apt update
           sudo apt install -y git curl python3 ccache repo
 
+      # -------------------------------
+      # CONFIG
+      # -------------------------------
       - name: Set CONFIG
         run: |
           CONFIG="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}"
           echo "CONFIG=$CONFIG" >> $GITHUB_ENV
+          echo "CONFIG=$CONFIG"
 
       - name: Setup ccache
         run: |
           ccache --max-size=2G
           echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
 
+      # -------------------------------
+      # Kernel Source
+      # -------------------------------
       - name: Init kernel source
         run: |
           mkdir "$CONFIG"
@@ -97,15 +95,13 @@ jobs:
           repo sync -c -j$(nproc) --no-tags
 
       # -------------------------------
-      # KernelSU NEXT (FIXT 6.6 + A15)
+      # KernelSU NEXT (OFFIZIELL)
       # -------------------------------
-      - name: Add KernelSU Next
+      - name: Add KernelSU-Next
         run: |
           cd "$CONFIG"
-          curl -LSs - name: Add KernelSU-Next
-  run: |
-    cd "$CONFIG"
-    curl -LSs https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh | bash - | bash
+          echo "Adding KernelSU-Next..."
+          curl -LSs https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh | bash -
 
       # -------------------------------
       # SUSFS (optional)
@@ -120,12 +116,14 @@ jobs:
         run: |
           cd "$CONFIG"
 
-          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch common/
+          PATCH="50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
+
+          cp ../susfs4ksu/kernel_patches/$PATCH common/
           cp ../susfs4ksu/kernel_patches/fs/* common/fs/
           cp ../susfs4ksu/kernel_patches/include/linux/* common/include/linux/
 
           cd common
-          patch -p1 --fuzz=3 < 50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch
+          patch -p1 --fuzz=3 < $PATCH
 
       # -------------------------------
       # Kernel config
@@ -133,7 +131,6 @@ jobs:
       - name: Kernel config
         run: |
           cd "$CONFIG"
-
           DEFCONFIG=common/arch/arm64/configs/gki_defconfig
 
           echo "CONFIG_KSU=y" >> $DEFCONFIG
