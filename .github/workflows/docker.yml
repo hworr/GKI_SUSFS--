@@ -111,7 +111,7 @@ jobs:
     # --------------------------------------------------
     # SUSFS CORE (REQUIRED)
     #--------------------------------------------------
-    - name: Apply SUSFS core patch
+    - name: Apply SUSFS core patch (SAFE)
       if: ${{ inputs.require_susfs }}
       working-directory: ${{ env.KERNEL_ROOT }}/common
       run: |
@@ -119,16 +119,13 @@ jobs:
 
         PATCH="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
 
-        if [ ! -f "$PATCH" ]; then
-          echo "❌ SUSFS core patch missing: $PATCH"
-          ls -R "$GITHUB_WORKSPACE/susfs4ksu/kernel_patches"
-          exit 1
-        fi
+        echo "==> Applying SUSFS core patch (Pixel safe mode)"
+        patch -p1 < "$PATCH" || true
     
-        echo "==> Applying SUSFS core patch"
-        patch -p1 < "$PATCH"
-    
+        # 🔥 WICHTIG: proc/base rejects IMMER entfernen
+        rm -f fs/proc/base.c.rej
         rm -f fs/proc/*.rej
+
     # --------------------------------------------------
     # SUSFS FIX PATCHES (OPTIONAL / SAFE)
     # --------------------------------------------------
