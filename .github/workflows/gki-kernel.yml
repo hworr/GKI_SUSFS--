@@ -115,11 +115,18 @@ jobs:
     # KERNEL SOURCE
     # --------------------------------------------------
       - name: Init kernel source
-        working-directory: ${{ env.KERNEL_ROOT }}
         run: |
-          BRANCH="common-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
-          $REPO init -u https://android.googlesource.com/kernel/manifest -b "$BRANCH"
-          $REPO sync -c -j$(nproc)
+          mkdir -p "$CONFIG"
+          cd "$CONFIG"
+
+          BRANCH="common-android15-6.6-2025-09"
+
+          repo init \
+          -u https://android.googlesource.com/kernel/manifest \
+          -b "$BRANCH" \
+          --depth=1
+
+          repo sync -c -j$(nproc) --no-tags --fail-fast
     # --------------------------------------------------
     # WildKSU
     # --------------------------------------------------
