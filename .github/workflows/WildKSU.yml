@@ -206,6 +206,29 @@ jobs:
           apply_optional "$FIX/fix_task_mmu.c.patch"
           apply_optional "$FIX/1_fix_base.c.patch"
           rm -f fs/proc/*.rej
+     #-------------------------------------------------
+     # Moduke Bypass
+     #-------------------------------------------------
+
+      - name: Apply Module Check Bypass
+        if: ${{ matrix.build_type == 'Bypass' || matrix.build_type == 'Hakan' }}
+        run: |
+          if [[ "${{ inputs.kernel_version }}" == "6.1" || "${{ inputs.kernel_version }}" == "6.6" || "${{ inputs.kernel_version }}" == "6.12" ]]; then
+          TARGET_FILE="$KERNEL_ROOT/common/kernel/module/version.c"
+          else
+          TARGET_FILE="$KERNEL_ROOT/common/kernel/module.c"
+          fi
+
+          echo "Applying bypass to $TARGET_FILE"
+          sed -i '/bad_version:/{:a;n;/return 0;/{s/return 0;/return 1;/;b};ba}' "$TARGET_FILE"
+          
+          if grep -A 5 "bad_version:" "$TARGET_FILE" | grep -q "return 1;"; then
+          echo "SUCCESS: Module check bypass verified in $TARGET_FILE"
+          else
+          echo "FAILED: Module check bypass not found in $TARGET_FILE"
+          grep -A 5 "bad_version:" "$TARGET_FILE" || true
+          exit 1
+          fi
       # --------------------------------------------------
       # Kernel config
       # --------------------------------------------------
@@ -236,12 +259,134 @@ jobs:
           echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=n" >> $DEFCONFIG
           echo "CONFIG_KSU_SUSFS_SUS_MOUNT=n" >> $DEFCONFIG
           echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=n" >> $DEFCONFIG
+
+
+          CONFIG_KSU=y
+          CONFIG_KSU_KPROBES_HOOK=n
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          CONFIG_IP_NF_TARGET_TTL=y
+          CONFIG_IP6_NF_TARGET_HL=y
+          CONFIG_IP6_NF_MATCH_HL=y
+          CONFIG_TCP_CONG_ADVANCED=y
+          CONFIG_TCP_CONG_BBR=y
+          CONFIG_NET_SCH_FQ=y
+          CONFIG_TCP_CONG_BIC=n
+          CONFIG_TCP_CONG_WESTWOOD=n
+          CONFIG_TCP_CONG_HTCP=n
+          CONFIG_IP_SET=y
+          CONFIG_IP_SET_MAX=65534
+          CONFIG_IP_SET_BITMAP_IP=y
+          CONFIG_IP_SET_BITMAP_IPMAC=y
+          CONFIG_IP_SET_BITMAP_PORT=y
+          CONFIG_IP_SET_HASH_IP=y
+          CONFIG_IP_SET_HASH_IPMARK=y
+          CONFIG_IP_SET_HASH_IPPORT=y
+          CONFIG_IP_SET_HASH_IPPORTIP=y
+          CONFIG_IP_SET_HASH_IPPORTNET=y
+          CONFIG_IP_SET_HASH_IPMAC=y
+          CONFIG_IP_SET_HASH_MAC=y
+          CONFIG_IP_SET_HASH_NETPORTNET=y
+          CONFIG_IP_SET_HASH_NET=y
+          CONFIG_IP_SET_HASH_NETNET=y
+          CONFIG_IP_SET_HASH_NETPORT=y
+          CONFIG_IP_SET_HASH_NETIFACE=y
+          CONFIG_IP_SET_LIST_SET=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_SUS_SU=n
+          EOF
+     
+          
+          if [[ "${{ inputs.android_version }}" == "android16" && "${{ inputs.kernel_version }}" == "6.12" ]]; then
+          sed -i '/name = "kernel_aarch64",/a\    check_defconfig = "disabled",' common/BUILD.bazel
+          awk '/name = "kernel_aarch64"/,/^\)/ {if(/check_defconfig = "disabled"/) found=1} END{if(found) print "SUCCESS: check_defconfig = \"disabled\" is in the kernel_aarch64 block"; else print "FAILED: NOT in the kernel_aarch64 block"}' common/BUILD.bazel
+          else
+          sed -i 's/check_defconfig//' ./common/build.config.gki
+          fi
+
+      - name: Configure Audio Modules
+        if: inputs.variant == 'Hakan'
+        working-directory: ${{ env.KERNEL_ROOT }}
+        run: |
+         cat >> "${{ env.DEFCONFIG }}" << 'EOF'
+         CONFIG_RFKILL=y
+         CONFIG_CFG80211=y
+         CONFIG_MAC80211=y
+         EOF
+
+         sed -i \
+          -e '/_COMMON_GKI_MODULES_LIST = \[/,/^[[:space:]]*\]/{/^[[:space:]]*"lib\/crypto\/libarc4\.ko",[[:space:]]*$/d}' \
+          -e '/_COMMON_GKI_MODULES_LIST = \[/,/^[[:space:]]*\]/{/^[[:space:]]*"net\/rfkill\/rfkill\.ko",[[:space:]]*$/d}' \
+          common/modules.bzl
+
+      - name: Configure SND
+        if: inputs.variant == 'vTomsonek'
+        working-directory: ${{ env.KERNEL_ROOT }}
+        run: |
+         cat >> "${{ env.DEFCONFIG }}" << 'EOF'
+              
+              CONFIG_SND=y
+              CONFIG_SND_DRIVERS=y
+              CONFIG_SND_PCM=y
+              CONFIG_SND_TIMER=y
+              CONFIG_SND_DYNAMIC_MINORS=y
+              CONFIG_SND_PROC_FS=y
+              CONFIG_SND_ALOOP=m
+              CONFIG_USB_GADGET=y
+              CONFIG_CONFIGFS_FS=y
+              CONFIG_USB_CONFIGFS=y
+              CONFIG_USB_LIBCOMPOSITE=m
+              CONFIG_USB_AUDIO=m
+              CONFIG_USB_CONFIGFS_F_UAC1=y
+              CONFIG_USB_CONFIGFS_F_UAC2=y
+              EOF
+              
+              echo "drivers/usb/gadget/legacy/g_audio.ko" >> common/android/gki_aarch64_modules
+              echo "sound/drivers/snd-aloop.ko" >> common/android/gki_aarch64_modules
+              
+              if [[ -f common/modules.bzl ]]; the
+          echo "Audio modules injection: adding to module list"
+          if [[ "${{ inputs.android_version }}" == "android14" && "${{ inputs.kernel_version }}" == "5.15" && $ACTUAL_SUBLEVEL -le 110 && "${{ inputs.os_patch_level }}" != "2023-09" ]] \
+          || [[ "${{ inputs.android_version }}" == "android14" && "${{ inputs.kernel_version }}" == "6.1" && $ACTUAL_SUBLEVEL -le 25 && "${{ inputs.os_patch_level }}" != "2023-09" ]]; then
+            # snd-aloop
+            sed -i '/COMMON_GKI_MODULES_LIST = \[/,/^[[:space:]]*\]/{/^[[:space:]]*\]$/i\    "sound/drivers/snd-aloop.ko",
+            }' common/modules.bzl
+            # USB Gadget Audio modules
+            sed -i '/COMMON_GKI_MODULES_LIST = \[/,/^[[:space:]]*\]/{/^[[:space:]]*\]$/i\    "drivers/usb/gadget/libcomposite.ko",
+            }' common/modules.bzl
+            sed -i '/COMMON_GKI_MODULES_LIST = \[/,/^[[:space:]]*\]/{/^[[:space:]]*\]$/i\    "drivers/usb/gadget/legacy/g_audio.ko",
+            }' common/modules.bzl
+          else
+            # snd-aloop
+            sed -i '/_COMMON_GKI_MODULES_LIST = \[/,/^[[:space:]]*\]/{/^[[:space:]]*\]$/i\    "sound/drivers/snd-aloop.ko",
+            }' common/modules.bzl
+            # USB Gadget Audio modules
+            sed -i '/_COMMON_GKI_MODULES_LIST = \[/,/^[[:space:]]*\]/{/^[[:space:]]*\]$/i\    "drivers/usb/gadget/libcomposite.ko",
+            }' common/modules.bzl
+            sed -i '/_COMMON_GKI_MODULES_LIST = \[/,/^[[:space:]]*\]/{/^[[:space:]]*\]$/i\    "drivers/usb/gadget/legacy/g_audio.ko",
+            }' common/modules.bzl
+          fi
+          
+          # Verify the injection was successful
+          if grep -q '"sound/drivers/snd-aloop.ko"' common/modules.bzl && \
+            grep -q '"drivers/usb/gadget/libcomposite.ko"' common/modules.bzl && \
+            grep -q '"drivers/usb/gadget/legacy/g_audio.ko"' common/modules.bzl && \
+            grep -q '"drivers/usb/gadget/configfs.ko"' common/modules.bzl; then
+            echo "✓ Audio modules injection: successfully added all modules to list"
+          else
+            echo "✗ Audio modules injection: failed to add one or more modules"
+            exit 1
+          fi
+         fi
+
           
           sed -i 's/check_defconfig//' common/build.config.gki
 
           # Entfernt -maybe-dirty aus der Versionskennung
           sed -i 's/-maybe-dirty//g' common/scripts/setlocalversion
           sed -i 's/-dirty//g' common/scripts/setlocalversion
+
+     
 
 
       # --------------------------------------------------
