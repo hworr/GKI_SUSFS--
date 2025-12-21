@@ -107,21 +107,23 @@ jobs:
       # SUSFS (optional)
       # -------------------------------
       - name: Clone SUSFS
-        if: ${{ inputs.require_susfs }}
+        if: ${{ inputs.require_susfs == true }}
         run: |
           git clone https://github.com/ShirkNeko/susfs4ksu.git
 
       - name: Apply SUSFS patches
-        if: ${{ inputs.require_susfs }}
+        if: ${{ inputs.require_susfs == true }}
         run: |
           cd "$CONFIG"
-
           PATCH="50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
-
+          if [ ! -f "../susfs4ksu/kernel_patches/$PATCH" ]; then
+          echo "❌ SUSFS patch not available for this kernel, skipping"
+          exit 0
+          fi
           cp ../susfs4ksu/kernel_patches/$PATCH common/
           cp ../susfs4ksu/kernel_patches/fs/* common/fs/
           cp ../susfs4ksu/kernel_patches/include/linux/* common/include/linux/
-
+          
           cd common
           patch -p1 --fuzz=3 < $PATCH
 
