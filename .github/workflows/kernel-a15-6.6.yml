@@ -1,9 +1,5 @@
 name: Android 15 6.6
 
-permissions:
-  contents: write
-  actions: write
-
 on:
   workflow_call:
     inputs:
@@ -26,25 +22,16 @@ on:
 
 jobs:
   build-kernel-a15-6-6:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - sub_level: "98"
-            os_patch_level: "2025-09"
-
     uses: ./.github/workflows/gki-kernel.yml
     secrets: inherit
-
     with:
       android_version: "android15"
       kernel_version: "6.6"
-      sub_level: ${{ matrix.sub_level }}
-      os_patch_level: ${{ matrix.os_patch_level }}
+      sub_level: "98"
+      os_patch_level: "2025-09"
 
       make_release: ${{ inputs.make_release }}
       kernelsu_variant: ${{ inputs.kernelsu_variant }}
       kernelsu_branch: ${{ inputs.kernelsu_branch }}
       kernelsu_branch_other: ${{ inputs.kernelsu_branch_other }}
-
       require_susfs: ${{ inputs.require_susfs }}
