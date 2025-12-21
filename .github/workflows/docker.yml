@@ -111,17 +111,31 @@ jobs:
     # --------------------------------------------------
     # SUSFS CORE (REQUIRED)
     # --------------------------------------------------
-    - name: Apply SUSFS core patch (REQUIRED)
-      working-directory: ${{ env.KERNEL_ROOT }}/common
+    - name: Apply SUSFS
+      if: ${{ inputs.require_susfs }}
       run: |
         set -e
-        PATCH="$SUSFS4KSU/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
-        if [ ! -f "$PATCH" ]; then
-        echo "❌ SUSFS core patch missing: $PATCH"
-        exit 1
+        cd "$KERNEL_ROOT"
+
+        if [[ "${{ inputs.android_version }}" == "android15" ]]; then
+          echo "==> Using SUSFS folder layout (Android 15)"
+          SUSFS_DIR="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/gki-android15-6.6"
+    
+          cp -r "$SUSFS_DIR/fs" common/
+          cp -r "$SUSFS_DIR/include" common/
+    
+          cd common
+          for p in "$SUSFS_DIR"/*.patch; do
+            echo "Applying $(basename "$p")"
+            patch -p1 --fuzz=3 < "$p"
+          done
+        else
+          echo "==> Using legacy SUSFS core patch"
+          cd common
+          PATCH="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
+          patch -p1 < "$PATCH"
         fi
-        echo "==> Applying SUSFS core patch"
-        patch -p1 < "$PATCH" || true
+    
         rm -f fs/proc/*.rej
     # --------------------------------------------------
     # SUSFS FIX PATCHES (OPTIONAL / SAFE)
