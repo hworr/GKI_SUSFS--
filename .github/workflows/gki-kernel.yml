@@ -1,4 +1,4 @@
-name: GKI Kernel Build (KernelSU-Next)
+name: GKI Kernel Build (KernelSU-Next + WildKSU SUSFS)
 
 permissions:
   contents: write
@@ -46,9 +46,9 @@ jobs:
       CCACHE_HARDLINK: "true"
 
     steps:
-      # -------------------------------
+      # --------------------------------------------------
       # Space & Dependencies
-      # -------------------------------
+      # --------------------------------------------------
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
@@ -65,23 +65,23 @@ jobs:
           sudo apt update
           sudo apt install -y git curl python3 ccache repo
 
-      # -------------------------------
+      # --------------------------------------------------
       # CONFIG
-      # -------------------------------
+      # --------------------------------------------------
       - name: Set CONFIG
         run: |
           CONFIG="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}"
           echo "CONFIG=$CONFIG" >> $GITHUB_ENV
-          echo "CONFIG=$CONFIG"
+          echo "Using CONFIG=$CONFIG"
 
       - name: Setup ccache
         run: |
           ccache --max-size=2G
           echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
 
-      # -------------------------------
+      # --------------------------------------------------
       # Kernel Source
-      # -------------------------------
+      # --------------------------------------------------
       - name: Init kernel source
         run: |
           mkdir "$CONFIG"
@@ -94,43 +94,50 @@ jobs:
 
           repo sync -c -j$(nproc) --no-tags
 
-      # -------------------------------
+      # --------------------------------------------------
       # KernelSU NEXT (OFFIZIELL)
-      # -------------------------------
+      # --------------------------------------------------
       - name: Add KernelSU-Next
         run: |
           cd "$CONFIG"
           echo "Adding KernelSU-Next..."
           curl -LSs https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh | bash -
 
-      # -------------------------------
-      # SUSFS (optional)
-      # -------------------------------
-      - name: Clone WildKSU SUSFS
+      # --------------------------------------------------
+      # WildKSU SUSFS (Android 15 / 6.6)
+      # --------------------------------------------------
+      - name: Clone WildKSU
         if: ${{ inputs.require_susfs }}
         run: |
           git clone https://github.com/WildKernels/WildKSU.git wildksu
 
-      - name: Apply WildKSU SUSFS patches (Android 15 / 6.6)
+      - name: Apply WildKSU SUSFS patches
         if: ${{ inputs.require_susfs }}
         run: |
           cd "$CONFIG"
 
-          echo "Applying WildKSU SUSFS patches..."
-          
-          cp ../wildksu/susfs/patches/*.patch common/ || true
-          cp -r ../wildksu/susfs/fs/* common/fs/
-          cp -r ../wildksu/susfs/include/linux/* common/include/linux/
-          
+          SUSFS_BASE="../wildksu/susfs/gki/android15/6.6"
+
+          if [ ! -d "$SUSFS_BASE" ]; then
+            echo "❌ WildKSU SUSFS directory not found: $SUSFS_BASE"
+            exit 1
+          fi
+
+          echo "Applying WildKSU SUSFS patches from $SUSFS_BASE"
+
+          cp "$SUSFS_BASE"/patches/*.patch common/
+          cp -r "$SUSFS_BASE"/fs/* common/fs/
+          cp -r "$SUSFS_BASE"/include/linux/* common/include/linux/
+
           cd common
           for p in *.patch; do
-          echo "Applying $p"
-          patch -p1 --fuzz=3 < "$p" || exit 1
+            echo "Applying $p"
+            patch -p1 --fuzz=3 < "$p"
           done
 
-      # -------------------------------
+      # --------------------------------------------------
       # Kernel config
-      # -------------------------------
+      # --------------------------------------------------
       - name: Kernel config
         run: |
           cd "$CONFIG"
@@ -146,11 +153,15 @@ jobs:
             echo "CONFIG_KSU_SUSFS=n" >> $DEFCONFIG
           fi
 
+          # REQUIRED for SUSFS
+          echo "CONFIG_TMPFS_XATTR=y" >> $DEFCONFIG
+          echo "CONFIG_TMPFS_POSIX_ACL=y" >> $DEFCONFIG
+
           sed -i 's/check_defconfig//' common/build.config.gki
 
-      # -------------------------------
+      # --------------------------------------------------
       # Build
-      # -------------------------------
+      # --------------------------------------------------
       - name: Build kernel
         run: |
           cd "$CONFIG"
@@ -161,9 +172,9 @@ jobs:
 
           tools/bazel build --config=fast //common:kernel_aarch64_dist
 
-      # -------------------------------
+      # --------------------------------------------------
       # Collect Image
-      # -------------------------------
+      # --------------------------------------------------
       - name: Collect Image
         run: |
           mkdir out
