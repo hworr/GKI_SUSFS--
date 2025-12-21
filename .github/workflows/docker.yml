@@ -136,67 +136,67 @@ jobs:
           add CONFIG_KSU_SUSFS n
         fi
 
-        add CONFIG_TMPFS_XATTR y
-        add CONFIG_TMPFS_POSIX_ACL y
-        add CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT y
-        add CONFIG_KSU_SUSFS_SUS_PATH y
-        add CONFIG_KSU_SUSFS_SPOOF_UNAME y
-
-        add CONFIG_KSU_SUSFS_TRY_UMOUNT n
-        add CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT n
-        add CONFIG_KSU_SUSFS_SUS_MOUNT n
-        add CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT n
-        add CONFIG_KSU_SUSFS_ENABLE_LOG n
-
-        add CONFIG_PID_NS y
-        add CONFIG_IPC_NS y
-        add CONFIG_USER_NS y
-        add CONFIG_POSIX_MQUEUE y
-        add CONFIG_CGROUP_DEVICE y
-
-        # Enable CGROUP_DEVICE only for android14-6.1 (with patch applied)
-          if [ "${{ inputs.android_version }}" = "android14" ] && [ "${{ inputs.kernel_version }}" = "6.1" ]; then
-            echo "CONFIG_CGROUP_DEVICE=y" >> "$CONFIG_FILE"
-          fi
-
-          # Add additional tmpfs config setting
-          echo "CONFIG_TMPFS_XATTR=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_TMPFS_POSIX_ACL=y" >> ./common/arch/arm64/configs/gki_defconfig
-
-          # Add additional config setting
-          echo "CONFIG_IP_NF_TARGET_TTL=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP6_NF_TARGET_HL=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP6_NF_MATCH_HL=y" >> ./common/arch/arm64/configs/gki_defconfig
-
-          # Add BBR Config
-          echo "CONFIG_TCP_CONG_ADVANCED=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_TCP_CONG_BBR=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NET_SCH_FQ=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_TCP_CONG_BIC=n" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_TCP_CONG_WESTWOOD=n" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_TCP_CONG_HTCP=n" >> ./common/arch/arm64/configs/gki_defconfig
-
-          # Add SUSFS configuration settings
-          echo "CONFIG_KSU_SUSFS=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_MAP=y" >> ./common/arch/arm64/configs/gki_defconfig
-          if [ "${{ inputs.kernel_version }}" != "6.6" ]; then
-          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ./common/arch/arm64/configs/gki_defconfig
-          else
-          echo "CONFIG_KSU_SUSFS_SUS_PATH=n" >> ./common/arch/arm64/configs/gki_defconfig
-          fi
-          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./common/arch/arm64/configs/gki_defconfig
-
+        # SUSFS core
+        add_cfg CONFIG_KSU_SUSFS y
         
+        # REQUIRED infra
+        add_cfg CONFIG_TMPFS_XATTR y
+        add_cfg CONFIG_TMPFS_POSIX_ACL y
+        
+        # SAFE features
+        add_cfg CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT y
+        add_cfg CONFIG_KSU_SUSFS_SUS_PATH y
+        add_cfg CONFIG_KSU_SUSFS_SPOOF_UNAME y
+        
+        # ❌ HARD DISABLE (Pixel modem / WLAN killers)
+        add_cfg CONFIG_KSU_SUSFS_TRY_UMOUNT n
+        add_cfg CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT n
+        add_cfg CONFIG_KSU_SUSFS_SUS_MOUNT n
+        add_cfg CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT n
+        add_cfg CONFIG_KSU_SUSFS_ENABLE_LOG n
+        add_cfg CONFIG_KSU_SUSFS_OPEN_REDIRECT n
+
+        # Namespaces
+        add_cfg CONFIG_PID_NS y
+        add_cfg CONFIG_IPC_NS y
+        add_cfg CONFIG_USER_NS y
+        add_cfg CONFIG_NET_NS y
+        add_cfg CONFIG_UTS_NS y
+        
+        # Cgroups
+        add_cfg CONFIG_CGROUPS y
+        add_cfg CONFIG_CGROUP_DEVICE y
+        add_cfg CONFIG_CGROUP_CPU y
+        add_cfg CONFIG_CGROUP_PIDS y
+        add_cfg CONFIG_CGROUP_SCHED y
+        add_cfg CONFIG_CGROUP_BPF y
+        
+        # Filesystems
+        add_cfg CONFIG_OVERLAY_FS y
+        add_cfg CONFIG_TMPFS y
+        
+        # Networking
+        add_cfg CONFIG_VETH y
+        add_cfg CONFIG_BRIDGE y
+        add_cfg CONFIG_BRIDGE_NETFILTER y
+        add_cfg CONFIG_NETFILTER y
+        add_cfg CONFIG_IP_NF_NAT y
+        add_cfg CONFIG_IP_NF_TARGET_MASQUERADE y
+        add_cfg CONFIG_IPV6 y
+
+         # Add BBR Config
+        add_cfg CONFIG_CGROUP_SCHED y
+          echo "CONFIG_TCP_CONG_ADVANCED=y" >> ./common/arch/arm64/configs/gki_defconfig
+        add_cfg CONFIG_CGROUP_BPF y
+          echo "CONFIG_TCP_CONG_BBR=y" >> ./common/arch/arm64/configs/gki_defconfig
+        
+          echo "CONFIG_NET_SCH_FQ=y" >> ./common/arch/arm64/configs/gki_defconfig
+        # Filesystems
+          echo "CONFIG_TCP_CONG_BIC=n" >> ./common/arch/arm64/configs/gki_defconfig
+        add_cfg CONFIG_OVERLAY_FS y
+          echo "CONFIG_TCP_CONG_WESTWOOD=n" >> ./common/arch/arm64/configs/gki_defconfig
+        add_cfg CONFIG_TMPFS y
+          echo "CONFIG_TCP_CONG_HTCP=n" >> ./common/arch/arm64/configs/gki_defconfig
 
         sed -i 's/check_defconfig//' common/build.config.gki
         sed -i 's/-maybe-dirty//g; s/-dirty//g' common/scripts/setlocalversion
