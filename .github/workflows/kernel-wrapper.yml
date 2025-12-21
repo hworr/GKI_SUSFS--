@@ -34,9 +34,9 @@ on:
         type: string
 
       require_susfs:
-        required: false
+        required: true
         type: boolean
-        default: false
+        default: true
 
 jobs:
   build:
