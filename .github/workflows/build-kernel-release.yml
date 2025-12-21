@@ -38,8 +38,6 @@ on:
       kernelsu_variant:
         description: "KernelSU variant"
         type: choice
-        options: [SukiSU]
-        default: SukiSU
       kernelsu_branch:
         description: "KernelSU branch"
         type: choice
