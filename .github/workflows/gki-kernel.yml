@@ -256,3 +256,15 @@ jobs:
         with:
           name: kernel-${{ env.CONFIG }}
           path: out/*
+
+    # --------------------------------------------------
+    # ANYKERNEL
+    # --------------------------------------------------
+      - name: Prepare AnyKernel3
+        run: |
+          cp "$KERNEL_ROOT/bazel-bin/common/kernel_aarch64/Image" AnyKernel3/Image
+      - name: Upload AnyKernel3
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnyKernel3
+          path: AnyKernel3/**
