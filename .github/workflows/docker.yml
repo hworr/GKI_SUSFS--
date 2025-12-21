@@ -211,8 +211,8 @@ jobs:
       # --------------------------------------------------
       - name: Kernel config
         run: |
-            cd "$CONFIG"
-            DEFCONFIG=common/arch/arm64/configs/gki_defconfig
+        cd "$CONFIG"
+        CONFIG_FILE="./common/arch/arm64/configs/gki_defconfig"
 
             echo "CONFIG_KSU=y" >> $DEFCONFIG
             echo "CONFIG_KSU_MANUAL_HOOK=y" >> $DEFCONFIG
