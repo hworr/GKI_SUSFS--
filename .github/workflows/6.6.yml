@@ -1,7 +1,7 @@
 name: Build Android 15 GKI 6.6
 
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
       make_release:
         required: true
