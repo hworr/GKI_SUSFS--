@@ -1,4 +1,4 @@
-choice: Build and Release GKI Kernels
+name: Build and Release GKI Kernels
 
 permissions:
   contents: write
@@ -11,44 +11,59 @@ on:
         description: "Build a12 5.10?"
         type: boolean
         default: false
+
       build_a13_510:
         description: "Build a13 5.10?"
         type: boolean
         default: false
+
       build_a13_515:
         description: "Build a13 5.15?"
         type: boolean
         default: false
+
       build_a14_515:
         description: "Build a14 5.15?"
         type: boolean
         default: false
+
       build_a14_61:
         description: "Build a14 6.1?"
         type: boolean
         default: true
+
       build_a15_66:
         description: "Build a15 6.6? (SUSFS REQUIRED)"
         type: boolean
         default: false
+
       make_release:
         description: "Create GitHub release?"
         type: boolean
         default: true
+
       kernelsu_variant:
         description: "KernelSU variant"
         type: choice
+        options:
+          - Next
+          - Stable
+          - Legacy
         default: Next
+
       kernelsu_branch:
         description: "KernelSU branch"
         type: choice
-        options: [Stable, Dev, Other]
+        options:
+          - Stable
+          - Dev
+          - Other
         default: Dev
+
       kernelsu_branch_other:
         description: "Custom KernelSU branch / tag"
         type: string
         default: ""
-
 jobs:
   build-kernel-a12-5-10:
     if: ${{ inputs.build_a12_510 }}
