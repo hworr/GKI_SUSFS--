@@ -103,38 +103,68 @@ jobs:
           echo "Adding KernelSU-Next..."
           curl -LSs https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh | bash -
 
-      # --------------------------------------------------
-      # WildKSU SUSFS (Android 15 / 6.6)
-      # --------------------------------------------------
-      - name: Clone WildKSU
-        if: ${{ inputs.require_susfs }}
+    # --------------------------------------------------
+    # DEPENDENCIES
+    # --------------------------------------------------
+      - name: Clone dependencies
         run: |
-          git clone https://github.com/WildKernels/WildKSU.git wildksu
-
-      - name: Apply WildKSU SUSFS patches
-        if: ${{ inputs.require_susfs }}
+          git clone https://github.com/WildKernels/kernel_patches.git
+          git clone https://github.com/WildKernels/AnyKernel3.git
+          git clone https://gitlab.com/WildKernels/susfs4ksu.git -b gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}
+    # --------------------------------------------------
+    # KERNEL SOURCE
+    # --------------------------------------------------
+      - name: Init kernel source
+        working-directory: ${{ env.KERNEL_ROOT }}
         run: |
-          cd "$CONFIG"
-
-          SUSFS_BASE="../wildksu/susfs/gki/android15/6.6"
-
-          if [ ! -d "$SUSFS_BASE" ]; then
-            echo "❌ WildKSU SUSFS directory not found: $SUSFS_BASE"
-            exit 1
+          BRANCH="common-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
+          $REPO init -u https://android.googlesource.com/kernel/manifest -b "$BRANCH"
+          $REPO sync -c -j$(nproc)
+    # --------------------------------------------------
+    # WildKSU
+    # --------------------------------------------------
+      - name: Add WildKSU
+        working-directory: ${{ env.KERNEL_ROOT }}
+        run: |
+          curl -LSs https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh | bash -s wild
+    # --------------------------------------------------
+    # SUSFS CORE (REQUIRED)
+    # --------------------------------------------------
+      - name: Apply SUSFS core patch (REQUIRED)
+        working-directory: ${{ env.KERNEL_ROOT }}/common
+        run: |
+          set -e
+          PATCH="$SUSFS4KSU/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
+          if [ ! -f "$PATCH" ]; then
+          echo "❌ SUSFS core patch missing: $PATCH"
+          exit 1
           fi
-
-          echo "Applying WildKSU SUSFS patches from $SUSFS_BASE"
-
-          cp "$SUSFS_BASE"/patches/*.patch common/
-          cp -r "$SUSFS_BASE"/fs/* common/fs/
-          cp -r "$SUSFS_BASE"/include/linux/* common/include/linux/
-
-          cd common
-          for p in *.patch; do
-            echo "Applying $p"
-            patch -p1 --fuzz=3 < "$p"
+          echo "==> Applying SUSFS core patch"
+          patch -p1 < "$PATCH" || true
+          rm -f fs/proc/*.rej
+    # --------------------------------------------------
+    # SUSFS FIX PATCHES (OPTIONAL / SAFE)
+    # --------------------------------------------------
+      - name: Apply SUSFS fix patches (optional)
+        working-directory: ${{ env.KERNEL_ROOT }}/common
+        run: |
+          set -e
+          FIX="$KERNEL_PATCHES/wild/susfs_fix_patches/v2.0.0"
+          apply_optional() {
+          local p="$1"
+          [ -f "$p" ] || return 0
+          for lvl in 0 1 2; do
+            if patch -p$lvl --dry-run < "$p" >/dev/null 2>&1; then
+              patch -p$lvl < "$p"
+              echo "✔ applied $(basename "$p")"
+              return
+            fi
           done
-
+          echo "⚠ skipped $(basename "$p")"
+        }
+        apply_optional "$FIX/fix_task_mmu.c.patch"
+        apply_optional "$FIX/1_fix_base.c.patch"
+        rm -f fs/proc/*.rej
       # --------------------------------------------------
       # Kernel config
       # --------------------------------------------------
