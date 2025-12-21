@@ -114,31 +114,31 @@ jobs:
     - name: Apply SUSFS core patch (REQUIRED)
       working-directory: ${{ env.KERNEL_ROOT }}/common
       run: |
-          set -e
-          PATCH="$SUSFS4KSU/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
-          if [ ! -f "$PATCH" ]; then
-          echo "❌ SUSFS core patch missing: $PATCH"
-          exit 1
-          fi
-          echo "==> Applying SUSFS core patch"
-          patch -p1 < "$PATCH" || true
-          rm -f fs/proc/*.rej
+        set -e
+        PATCH="$SUSFS4KSU/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
+        if [ ! -f "$PATCH" ]; then
+        echo "❌ SUSFS core patch missing: $PATCH"
+        exit 1
+        fi
+        echo "==> Applying SUSFS core patch"
+        patch -p1 < "$PATCH" || true
+        rm -f fs/proc/*.rej
     # --------------------------------------------------
     # SUSFS FIX PATCHES (OPTIONAL / SAFE)
     # --------------------------------------------------
     - name: Apply SUSFS fix patches (optional)
       working-directory: ${{ env.KERNEL_ROOT }}/common
       run: |
-          set -e
-          FIX="$KERNEL_PATCHES/wild/susfs_fix_patches/v2.0.0"
-          apply_optional() {
-          local p="$1"
-          [ -f "$p" ] || return 0
-          for lvl in 0 1 2; do
-            if patch -p$lvl --dry-run < "$p" >/dev/null 2>&1; then
-              patch -p$lvl < "$p"
-              echo "✔ applied $(basename "$p")"
-              return
+        set -e
+        FIX="$KERNEL_PATCHES/wild/susfs_fix_patches/v2.0.0"
+        apply_optional() {
+        local p="$1"
+        [ -f "$p" ] || return 0
+        for lvl in 0 1 2; do
+          if patch -p$lvl --dry-run < "$p" >/dev/null 2>&1; then
+            patch -p$lvl < "$p"
+            echo "✔ applied $(basename "$p")"
+            return
             fi
           done
           echo "⚠ skipped $(basename "$p")"
