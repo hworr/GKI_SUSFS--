@@ -118,15 +118,16 @@ jobs:
       # --------------------------------------------------
       - name: Init kernel source
         run: |
+          rm -rf "$CONFIG"
+          mkdir -p "$CONFIG"
           cd "$CONFIG"
 
-          BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
+          BRANCH="android15-6.6-2025-09"
           repo init --depth=1 \
-            -u https://android.googlesource.com/kernel/manifest \
-            -b common-$BRANCH
+          -u https://android.googlesource.com/kernel/manifest \
+          -b common-$BRANCH
 
           repo sync -c -j$(nproc) --no-tags
-
       # --------------------------------------------------
       # KernelSU NEXT (OFFIZIELL)
       # --------------------------------------------------
