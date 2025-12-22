@@ -264,13 +264,20 @@ jobs:
             echo "CONFIG_KSU_SUSFS=n" >> "$DEFCONFIG"
           fi
 
-          # Required for SUSFS
+          
           {  
-            echo "CONFIG_RFKILL=y" >> "$DEFCONFIG"
-            echo "CONFIG_CFG80211=y" >> "$DEFCONFIG"
-            echo "CONFIG_MAC80211=y" >> "$DEFCONFIG"
-            echo "CONFIG_BT=y" >> "$DEFCONFIG"
-            echo "CONFIG_BT_HCIUART=y" >> "$DEFCONFIG"
+            # WiFi / RF
+            echo "CONFIG_RFKILL=m" >> "$DEFCONFIG"
+            echo "CONFIG_CFG80211=m" >> "$DEFCONFIG"
+            echo "CONFIG_MAC80211=m" >> "$DEFCONFIG"
+                  
+            # Bluetooth
+            echo "CONFIG_BT=m" >> "$DEFCONFIG"
+            echo "CONFIG_BT_HCIUART=m" >> "$DEFCONFIG"
+            echo "CONFIG_BT_HCIUART_QCA=m" >> "$DEFCONFIG"
+            echo "CONFIG_BT_HCIUART_BCM=m" >> "$DEFCONFIG"
+            echo "CONFIG_BT_HCIUART=m" >> "$DEFCONFIG"
+            
             echo "CONFIG_TMPFS_XATTR=y"
             echo "CONFIG_TMPFS_POSIX_ACL=y"
             echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y"
