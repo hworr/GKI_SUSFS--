@@ -138,23 +138,34 @@ jobs:
       # --------------------------------------------------
       # KERNEL SOURCE
       # --------------------------------------------------
-      - name: Init kernel source
+      - name: Initialize and Sync Kernel Source
         run: |
-          set -e
-          CONFIG="${{ env.CONFIG }}"
-          rm -rf "$CONFIG"
+          echo "Creating folder for configuration: $CONFIG..."
           mkdir -p "$CONFIG"
           cd "$CONFIG"
+          echo "Initializing and syncing kernel source..."
+          FORMATTED_BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
+          $REPO init --depth=1 --u https://android.googlesource.com/kernel/manifest -b common-${FORMATTED_BRANCH} --repo-rev=v2.16
+          REMOTE_BRANCH=$(git ls-remote https://android.googlesource.com/kernel/common ${FORMATTED_BRANCH})
+          DEFAULT_MANIFEST_PATH=.repo/manifests/default.xml
+          if grep -q deprecated <<< $REMOTE_BRANCH; then
+            echo "Found deprecated branch: $FORMATTED_BRANCH"
+            sed -i "s/\"${FORMATTED_BRANCH}\"/\"deprecated\/${FORMATTED_BRANCH}\"/g" $DEFAULT_MANIFEST_PATH
+          fi
+          $REPO --version
+          $REPO --trace sync -c -j$(nproc --all) --no-tags --fail-fast
 
-          # Branch naming: adjust if needed
-          BRANCH="common-android15-6.6-2025-10"
-
-          "$REPO" init \
-            -u https://android.googlesource.com/kernel/manifest \
-            -b "$BRANCH" \
-            --depth=1
-
-          "$REPO" sync -c -j"$(nproc)" --no-tags --fail-fast
+      - name: Apply glibc 2.38 Compatibility Fix
+        if: inputs.android_version == 'android14' && inputs.kernel_version == '6.1'
+        run: |
+          if [ ! -e build/build.sh ]; then 
+            GLIBC_VERSION=$(ldd --version 2>/dev/null | head -n 1 | awk '{print $NF}') 
+            echo "GLIBC_VERSION: $GLIBC_VERSION" 
+            if [ "$(printf '%s\n' "2.38" "$GLIBC_VERSION" | sort -V | head -n1)" = "2.38" ]; then 
+              echo "Patching resolve_btfids/Makefile" 
+              cd $CONFIG/common/ && sed -i '/\$(Q)\$(MAKE) -C \$(SUBCMD_SRC) OUTPUT=\$(abspath \$(dir \$@))\/ \$(abspath \$@)/s//$(Q)$(MAKE) -C $(SUBCMD_SRC) EXTRA_CFLAGS="$(CFLAGS)" OUTPUT=$(abspath $(dir $@))\/ $(abspath $@)/' tools/bpf/resolve_btfids/Makefile || echo "No patch needed." 
+            fi 
+          fi
 
       # --------------------------------------------------
       # WildKSU
@@ -376,6 +387,47 @@ jobs:
             fi
           fi
 
+          if [ -f common/drivers/android/binder/Makefile ]; then
+          perl -i -0777 -pe 's/\$\(\s*CONFIG_ANDROID_BINDER_IPC_RUST\s*\)/m/' common/drivers/android/binder/Makefile
+          #perl -i -ne 'print unless /CONFIG_ANDROID_BINDER_IPC_RUST_DUMMY/' common/drivers/android/binder/Makefile
+          perl -i -pe 's/^rust_binder-\$\([^)]+\)\s*:=/rust_binder-y :=/' common/drivers/android/binder/Makefile
+          cat common/drivers/android/Makefile
+          cat common/drivers/android/binder/Makefile
+          #perl -ni -e 'print unless /rust_toolchain\s*=\s*"\/\/build\/rust:linux_kernel_toolchain",/' common/BUILD.bazel
+          #cat common/BUILD.bazel
+          rustup set profile minimal
+          rustup update nightly
+          rustup default nightly
+          rustup target add aarch64-unknown-none
+          else
+          perl -i -0777 -pe 's/\$\(\s*CONFIG_ANDROID_BINDER_IPC_RUST\s*\)/m/' common/drivers/android/Makefile
+          cat common/drivers/android/Makefile
+          fi
+
+          - name: Change Kernel Name
+          if: ${{ inputs.use_make == false }}
+          run: |
+          cd "$CONFIG"
+          if [ -f "build/build.sh" ]; then
+              perl -pi -e 's/-dirty//' ./common/scripts/setlocalversion
+              perl -0777 -pi -e 's/(echo "\$res")(?!.*echo "\$res")/echo "\$res-${{ inputs.kernelsu_variant }}-\$KSUVER-SUSFS-v1.5.9-Wild"/s' ./common/scripts/setlocalversion
+              perl -pi -e 's{UTS_VERSION="\$\(echo \$UTS_VERSION \$CONFIG_FLAGS \$TIMESTAMP \| cut -b -\$UTS_LEN\)"}{UTS_VERSION="#1 SMP PREEMPT Sun Apr 20 04:20:00 UTC 2025"}' ./common/scripts/mkcompile_h
+          else
+              #Remove -maybe-dirty
+              perl -pi -e 's/-maybe-dirty//g' ./build/kernel/kleaf/impl/stamp.bzl
+              
+              #Set Kernel Name
+              echo "CONFIG_LOCALVERSION=\"-${{ inputs.kernelsu_variant }}-$KSUVER-SUSFS-v1.5.9-Wild\"" >> ./common/arch/arm64/configs/gki_defconfig
+
+              #Set Kernel Timestamp
+              perl -pi -e 's/build-timestamp = \$\(or \$\(KBUILD_BUILD_TIMESTAMP\), \$\(build-timestamp-auto\)\)/build-timestamp = "Sun Apr 20 04:20:00 UTC 2025"/' ./common/init/Makefile
+
+              #Remove Abi Exports and Error
+              rm -rf ./common/android/abi_gki_protected_exports_*
+              perl -pi -e 's/^\s*"protected_exports_list"\s*:\s*"android\/abi_gki_protected_exports_aarch64",\s*$//;' ./common/BUILD.bazel
+            fi
+
+            
       # --------------------------------------------------
       # Build
       # --------------------------------------------------
