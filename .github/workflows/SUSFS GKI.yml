@@ -168,28 +168,38 @@ jobs:
           key: kernel-android15-6.6-${{ inputs.kernel_sublevel }}-${{ inputs.os_patch_level }}
       
       # Nur wenn CCache NICHT da ist → repo init + sync
-      - name: Initialize and Sync Kernel Source
-        if: steps.kernel-cache.outputs.cache-hit != 'true'
-        working-directory: ${{ env.KERNEL_ROOT }}
+      - name: Repo init & sync
+        working-directory: ${{ github.workspace }}
         run: |
           set -e
+      
           FORMATTED_BRANCH="android15-6.6-${{ inputs.os_patch_level }}"
-          echo "==> repo init common-${FORMATTED_BRANCH}"
+      
           $REPO init -u https://android.googlesource.com/kernel/manifest \
             -b common-${FORMATTED_BRANCH}
       
-          REMOTE_BRANCH=$(git ls-remote https://android.googlesource.com/kernel/common "refs/heads/${FORMATTED_BRANCH}")
-          if [ -z "$REMOTE_BRANCH" ]; then
-            sed -i "s/${FORMATTED_BRANCH}/deprecated\/${FORMATTED_BRANCH}/g" .repo/manifests/default.xml
-          fi
-      
           $REPO sync -j$(nproc --all) --fail-fast
       
+      - name: Detect kernel sublevel
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -e
+      
           ACTUAL_SUBLEVEL=$(grep '^SUBLEVEL =' common/Makefile | awk '{print $3}')
+      
+          if [ -z "$ACTUAL_SUBLEVEL" ]; then
+            echo "❌ ACTUAL_SUBLEVEL could not be detected"
+            exit 1
+          fi
+      
           echo "ACTUAL_SUBLEVEL=$ACTUAL_SUBLEVEL" >> $GITHUB_ENV
+          echo "Detected sublevel: $ACTUAL_SUBLEVEL"
 
+      - name: Set KERNEL_ROOT
+        run: |
           KERNEL_ROOT="$GITHUB_WORKSPACE/android15-6.6-${ACTUAL_SUBLEVEL}"
           echo "KERNEL_ROOT=$KERNEL_ROOT" >> $GITHUB_ENV
+          echo "KERNEL_ROOT set to $KERNEL_ROOT"
 
       - name: Save kernel source cache
         if: steps.kernel-cache.outputs.cache-hit != 'true'
