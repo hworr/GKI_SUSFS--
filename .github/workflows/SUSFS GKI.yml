@@ -708,6 +708,31 @@ jobs:
           }
           }' common/BUILD.bazel
 
+      - name: Final KernelSU + SUSFS config
+        working-directory: ${{ env.KERNEL_ROOT }}
+        run: |
+          set -e
+      
+          DEFCONFIG=common/arch/arm64/configs/gki_defconfig
+      
+          sed -i '/^CONFIG_KSU/d' "$DEFCONFIG"
+          sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
+      
+          cat >> "$DEFCONFIG" << 'EOF'
+          CONFIG_KSU=y
+          CONFIG_KSU_MANUAL_HOOK=y
+          CONFIG_KSU_KPROBES_HOOK=n
+          
+          CONFIG_SUSFS=y
+          CONFIG_KSU_SUSFS=y
+          
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          EOF
+      
+          echo "✓ Final KernelSU + SUSFS config applied"
+          grep -E '^CONFIG_(KSU|SUSFS)' "$DEFCONFIG"
+
       - name: Config Kernel Name
         run: |
           echo "Changing to configuration directory: $CONFIG..."
