@@ -186,6 +186,13 @@ jobs:
           ACTUAL_SUBLEVEL=$(grep '^SUBLEVEL =' common/Makefile | awk '{print $3}')
           echo "ACTUAL_SUBLEVEL=$ACTUAL_SUBLEVEL" >> $GITHUB_ENV
 
+      - name: Save kernel source cache
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.KERNEL_ROOT }}
+          key: kernel-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.kernel_sublevel }}-${{ inputs.os_patch_level }}
+
 
       - name: Apply glibc 2.38 Compatibility Fix
         run: |
