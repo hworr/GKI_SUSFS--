@@ -239,6 +239,88 @@ jobs:
             # git revert -m 1 $(git log --grep="remove devpts hook" --pretty=format:"%h") -n
           fi
 
+      # --------------------------------------------------
+      # SUSFS CORE (REQUIRED)
+      # --------------------------------------------------
+      - name: Apply SUSFS core patch (REQUIRED)
+        working-directory: ${{ env.KERNEL_ROOT }}/common
+        run: |
+          set -e
+          PATCH="$SUSFS4KSU/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
+          if [ ! -f "$PATCH" ]; then
+            echo "SUSFS core patch missing: $PATCH"
+            exit 1
+          fi
+          echo "==> Applying SUSFS core patch"
+          patch -p1 < "$PATCH" || true
+          rm -f fs/proc/*.rej
+
+      #---------------------------------------------------
+      # SUSFS Debug
+      #---------------------------------------------------
+      
+      #- name: Apply SUSFS debug init (EXPERIMENTAL)
+      #  working-directory: ${{ env.KERNEL_ROOT }}/common
+      #  run: |
+      #   set -e
+      #   echo "==> Applying SUSFS debug init patch"
+      #   patch -p1 < "$GITHUB_WORKSPACE/susfs_debug_init.patch"
+
+      # --------------------------------------------------
+      # SUSFS FIX PATCHES (OPTIONAL / SAFE)
+      # --------------------------------------------------
+      
+      - name: Apply SUSFS fix patches (REQUIRED)
+        working-directory: ${{ env.KERNEL_ROOT }}/common
+        run: |
+          set -e
+          FIX="$KERNEL_PATCHES/wild/susfs_fix_patches/v2.0.0"
+          apply_optional() {
+            local p="$1"
+            [ -f "$p" ] || return 0
+            for lvl in 0 1 2; do
+              if patch -p"$lvl" --dry-run < "$p" >/dev/null 2>&1; then
+                patch -p"$lvl" < "$p"
+                echo "applied $(basename "$p") with -p$lvl"
+                return
+              fi
+            done
+            echo "skipped $(basename "$p")"
+          }
+          apply_optional "$FIX/fix_task_mmu.c.patch"
+          apply_optional "$FIX/1_fix_base.c.patch"
+          rm -f fs/proc/*.rej
+
+      - name: Force enable SUSFS core (FINAL)
+        working-directory: ${{ env.KERNEL_ROOT }}
+        run: |
+          set -e
+
+          DEFCONFIG="common/arch/arm64/configs/gki_defconfig"
+
+          echo "==> Forcing SUSFS core into gki_defconfig"
+
+          # Remove old entries if present
+          sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
+
+          # Add SUSFS core
+          cat >> "$DEFCONFIG" << 'EOF'
+          CONFIG_SUSFS=y
+          CONFIG_SUSFS_PROC=y
+          CONFIG_SUSFS_MAGIC_MOUNT=y
+          CONFIG_SUSFS_AUTO_BIND=y
+          CONFIG_SUSFS_SUS_PATH=y
+          EOF
+
+          echo "==> Verifying SUSFS in gki_defconfig"
+          grep -q '^CONFIG_SUSFS=y' "$DEFCONFIG" || {
+            echo "❌ CONFIG_SUSFS missing in gki_defconfig – aborting build"
+            exit 1
+          }
+
+          grep '^CONFIG_SUSFS' "$DEFCONFIG"
+
+
       - name: Apply Module Check Bypass
         if: ${{ matrix.build_type == 'Bypass' || matrix.build_type == 'Hakan' }}
         run: |
