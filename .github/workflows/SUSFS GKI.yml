@@ -66,6 +66,10 @@ jobs:
 
           echo "CONFIG set to: $CONFIG"
 
+          # Set KERNEL_ROOT
+          KERNEL_ROOT="$GITHUB_WORKSPACE/android15-6.6-${ACTUAL_SUBLEVEL}"
+          echo "KERNEL_ROOT=$KERNEL_ROOT" >> $GITHUB_ENV
+ 
       # Install ccache
       - name: Install ccache
         run: sudo apt update && sudo apt upgrade -y && sudo apt install -y ccache python3 git curl
@@ -311,17 +315,19 @@ jobs:
             exit 1
           fi
 
-      - name: Add KernelSU
+      - name: Add SukiSU
+        if: ${{ inputs.kernelsu_variant == 'SukiSU' }}
+        working-directory: ${{ env.KERNEL_ROOT }}
         run: |
-          echo "Changing to configuration directory: $CONFIG..."
-          cd "$CONFIG"
-          if [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
-            echo "Adding SukiSU..."
-            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash $BRANCH
-            cd KernelSU
-            git revert -m 1 $(git log --grep="KSU_SUKISU" --pretty=format:"%h") -n || true
-            # git revert -m 1 $(git log --grep="remove devpts hook" --pretty=format:"%h") -n
-          fi
+          set -e
+      
+          echo "Adding SukiSU..."
+          curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash $BRANCH
+      
+          cd KernelSU
+      
+          # Revert problematic commits safely
+          git revert -m 1 $(git log --grep="KSU_SUKISU" --pretty=format:"%h" -n 1) -n || true
 
       # --------------------------------------------------
       # SUSFS CORE (REQUIRED)
