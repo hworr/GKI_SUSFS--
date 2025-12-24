@@ -66,9 +66,7 @@ jobs:
 
           echo "CONFIG set to: $CONFIG"
 
-          # Set KERNEL_ROOT
-          KERNEL_ROOT="$GITHUB_WORKSPACE/android15-6.6-${ACTUAL_SUBLEVEL}"
-          echo "KERNEL_ROOT=$KERNEL_ROOT" >> $GITHUB_ENV
+
  
       # Install ccache
       - name: Install ccache
@@ -189,6 +187,9 @@ jobs:
       
           ACTUAL_SUBLEVEL=$(grep '^SUBLEVEL =' common/Makefile | awk '{print $3}')
           echo "ACTUAL_SUBLEVEL=$ACTUAL_SUBLEVEL" >> $GITHUB_ENV
+
+          KERNEL_ROOT="$GITHUB_WORKSPACE/android15-6.6-${ACTUAL_SUBLEVEL}"
+          echo "KERNEL_ROOT=$KERNEL_ROOT" >> $GITHUB_ENV
 
       - name: Save kernel source cache
         if: steps.kernel-cache.outputs.cache-hit != 'true'
