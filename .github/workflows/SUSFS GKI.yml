@@ -164,10 +164,10 @@ jobs:
         id: kernel-cache
         uses: actions/cache@v4
         with:
-          path: ${{ env.KERNEL_ROOT }}
-          key: kernel-android15-6.6-${{ inputs.kernel_sublevel }}-${{ inputs.os_patch_level }}
-      
-      # Nur wenn CCache NICHT da ist → repo init + sync
+          path: ${{ github.workspace }}/android15-6.6-*
+          key: kernel-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.kernel_sublevel }}-${{ inputs.os_patch_level }}
+            
+        # Nur wenn CCache NICHT da ist → repo init + sync
       - name: Repo init & sync
         working-directory: ${{ github.workspace }}
         run: |
