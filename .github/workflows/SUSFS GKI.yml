@@ -153,7 +153,9 @@ jobs:
 
       - name: Set kernel root
         run: |
-          echo "KERNEL_ROOT=$GITHUB_WORKSPACE/android15-6.6-${{ inputs.kernel_sublevel }}" >> $GITHUB_ENV
+          KERNEL_ROOT="$GITHUB_WORKSPACE/android15-6.6-${{ inputs.kernel_sublevel }}"
+          echo "KERNEL_ROOT=$KERNEL_ROOT" >> $GITHUB_ENV
+          mkdir -p "$KERNEL_ROOT"
 
       # CCache zuerst prüfen
       - name: Restore kernel source cache
@@ -161,7 +163,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.KERNEL_ROOT }}
-          key: kernel-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.kernel_sublevel }}-${{ inputs.os_patch_level }}
+          key: kernel-android15-6.6-${{ inputs.kernel_sublevel }}-${{ inputs.os_patch_level }}
       
       # Nur wenn CCache NICHT da ist → repo init + sync
       - name: Initialize and Sync Kernel Source
@@ -169,35 +171,20 @@ jobs:
         working-directory: ${{ env.KERNEL_ROOT }}
         run: |
           set -e
-          echo "Repo init & sync…"
-      
-          # 🔹 Manifest-Branch = Android + Kernel + Patchlevel (OHNE Sublevel)
-          FORMATTED_BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
-      
-          echo "==> repo init (common-${FORMATTED_BRANCH})"
+          FORMATTED_BRANCH="android15-6.6-${{ inputs.os_patch_level }}"
+          echo "==> repo init common-${FORMATTED_BRANCH}"
           $REPO init -u https://android.googlesource.com/kernel/manifest \
             -b common-${FORMATTED_BRANCH}
       
-          # deprecated-Handling
           REMOTE_BRANCH=$(git ls-remote https://android.googlesource.com/kernel/common "refs/heads/${FORMATTED_BRANCH}")
-          DEFAULT_MANIFEST_PATH=".repo/manifests/default.xml"
-      
           if [ -z "$REMOTE_BRANCH" ]; then
-            echo "⚠️ Branch deprecated – switching to deprecated/${FORMATTED_BRANCH}"
-            sed -i "s/${FORMATTED_BRANCH}/deprecated\/${FORMATTED_BRANCH}/g" "$DEFAULT_MANIFEST_PATH"
+            sed -i "s/${FORMATTED_BRANCH}/deprecated\/${FORMATTED_BRANCH}/g" .repo/manifests/default.xml
           fi
       
-          echo "==> repo sync"
           $REPO sync -j$(nproc --all) --fail-fast
       
-          # 🔹 REAL Sublevel aus dem Kernel holen
           ACTUAL_SUBLEVEL=$(grep '^SUBLEVEL =' common/Makefile | awk '{print $3}')
-      
           echo "ACTUAL_SUBLEVEL=$ACTUAL_SUBLEVEL" >> $GITHUB_ENV
-      
-          ARTIFACT_BASE="6.6.${ACTUAL_SUBLEVEL}-${{ inputs.android_version }}-${{ inputs.os_patch_level }}-Bypass"
-          echo "ARTIFACT_BASE=$ARTIFACT_BASE" >> $GITHUB_ENV
-          echo "FILE_NAME=$ARTIFACT_BASE" >> $GITHUB_ENV
 
 
       - name: Apply glibc 2.38 Compatibility Fix
