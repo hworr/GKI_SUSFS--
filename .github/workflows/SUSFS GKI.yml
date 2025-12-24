@@ -151,13 +151,13 @@ jobs:
           git clone https://github.com/ShirkNeko/SukiSU_patch.git
           git clone https://github.com/MiRinChan/AnyKernel3.git
 
-                # Cache zuerst prüfen
+        # Cache zuerst prüfen
       - name: Restore kernel source cache
         id: kernel-cache
         uses: actions/cache@v4
         with:
           path: ${{ env.KERNEL_ROOT }}
-          key: kernel-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
+          key: kernel-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.kernel_sublevel }}-${{ inputs.os_patch_level }}
       
       # Nur wenn Cache NICHT da ist → repo init + sync
       - name: Initialize and Sync Kernel Source
