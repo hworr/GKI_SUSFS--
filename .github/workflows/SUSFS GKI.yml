@@ -184,22 +184,38 @@ jobs:
           # Sync repo and apply patches
           $REPO --version
           $REPO --trace sync -c -j$(nproc --all) --no-tags --fail-fast
+          
       - name: Determine the branch for KernelSU
         run: |
-          if [[ "${{ inputs.kernelsu_branch }}" == "Stable" && ( "${{ inputs.kernelsu_variant }}" == "SukiSU" ) ]]; then
-              echo "BRANCH=-s builtin" >> $GITHUB_ENV
-          elif [[ "${{ inputs.kernelsu_branch }}" == "Dev" && ( "${{ inputs.kernelsu_variant }}" == "SukiSU" ) ]]; then
-              if [[ "${{ inputs.kernel_version }}" == "5.10" ]]; then
+          set -e
+          
+            KSU_BRANCH_RAW="${{ inputs.kernelsu_branch }}"
+            KSU_BRANCH="${KSU_BRANCH_RAW%%(*}"
+            KSU_VARIANT="${{ inputs.kernelsu_variant }}"
+            KERNEL_VERSION="${{ inputs.kernel_version }}"
+          
+              echo "DEBUG: branch_raw=$KSU_BRANCH_RAW"
+              echo "DEBUG: branch=$KSU_BRANCH"
+              echo "DEBUG: variant=$KSU_VARIANT"
+          
+              if [[ "$KSU_BRANCH" == "Stable" && "$KSU_VARIANT" == "SukiSU" ]]; then
                   echo "BRANCH=-s builtin" >> $GITHUB_ENV
+          
+              elif [[ "$KSU_BRANCH" == "Dev" && "$KSU_VARIANT" == "SukiSU" ]]; then
+                  echo "BRANCH=-s builtin" >> $GITHUB_ENV
+          
+              elif [[ "$KSU_BRANCH" == "Other" ]]; then
+                  if [[ -n "${{ inputs.kernelsu_branch_other }}" ]]; then
+                      echo "BRANCH=-s ${{ inputs.kernelsu_branch_other }}" >> $GITHUB_ENV
+                  else
+                      echo "❌ Error: Custom branch not provided for 'Other'" >&2
+                      exit 1
+                  fi
               else
-                  echo "BRANCH=-s builtin" >> $GITHUB_ENV
+                  echo "❌ Error: Unsupported KernelSU branch selection: $KSU_BRANCH_RAW" >&2
+                  exit 1
               fi
-          elif [[ "${{ inputs.kernelsu_branch }}" == "Other" && -n "${{ inputs.kernelsu_branch_other }}" ]]; then
-            echo "BRANCH=-s ${{ inputs.kernelsu_branch_other }}" >> $GITHUB_ENV
-          else
-            echo "Error: Custom branch not provided for 'Other'" >&2
-            exit 1
-          fi
+
 
       - name: Add BBG
         shell: bash
