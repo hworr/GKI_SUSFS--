@@ -239,6 +239,27 @@ jobs:
             # git revert -m 1 $(git log --grep="remove devpts hook" --pretty=format:"%h") -n
           fi
 
+      - name: Apply Module Check Bypass
+        if: ${{ matrix.build_type == 'Bypass' || matrix.build_type == 'Hakan' }}
+        run: |
+          if [[ "${{ inputs.kernel_version }}" == "6.1" || "${{ inputs.kernel_version }}" == "6.6" || "${{ inputs.kernel_version }}" == "6.12" ]]; then
+            TARGET_FILE="$KERNEL_ROOT/common/kernel/module/version.c"
+          else
+            TARGET_FILE="$KERNEL_ROOT/common/kernel/module.c"
+          fi
+
+          echo "Applying bypass to $TARGET_FILE"
+          sed -i '/bad_version:/{:a;n;/return 0;/{s/return 0;/return 1;/;b};ba}' "$TARGET_FILE"
+
+          # Verify the bypass
+          if grep -A 5 "bad_version:" "$TARGET_FILE" | grep -q "return 1;"; then
+            echo "SUCCESS: Module check bypass verified in $TARGET_FILE"
+          else
+            echo "FAILED: Module check bypass not found in $TARGET_FILE"
+            grep -A 5 "bad_version:" "$TARGET_FILE" || true
+            exit 1
+          fi
+
       # - name: Apply SUSFS Patches for KernelSU Variants
       #   run: |
       #     echo "Changing to configuration directory: $CONFIG..."
