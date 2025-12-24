@@ -549,17 +549,13 @@ jobs:
           # Remove check_defconfig
           sed -i 's/check_defconfig//' ./common/build.config.gki
 
-          sed -i '/name = "kernel_aarch64",/,/)/{
-          /module_outs = \[/!{
-          /)/i\
-              module_outs = [\
-                  "net/wireless/cfg80211.ko",\
-                  "net/mac80211/mac80211.ko",\
-                  "drivers/net/usb/rndis_host.ko",\
-              ],\
-          }
-          }' common/BUILD.bazel
-
+          if ! grep -q 'cfg80211.ko' common/BUILD.bazel; then
+            sed -i '/module_outs = \[/a\
+                "net/wireless/cfg80211.ko",\
+                "net/mac80211/mac80211.ko",\
+                "drivers/net/usb/rndis_host.ko",
+            ' common/BUILD.bazel
+          fi
 
       - name: Config Kernel Name
         run: |
