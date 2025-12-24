@@ -151,14 +151,17 @@ jobs:
           git clone https://github.com/ShirkNeko/SukiSU_patch.git
           git clone https://github.com/MiRinChan/AnyKernel3.git
 
+      - name: Set kernel root
+        run: |
+          echo "KERNEL_ROOT=$GITHUB_WORKSPACE/android15-6.6-${{ inputs.kernel_sublevel }}" >> $GITHUB_ENV
+
       # CCache zuerst prüfen
-      - name: Restore ccache
+      - name: Restore kernel source cache
+        id: kernel-cache
         uses: actions/cache@v4
         with:
-          path: /home/runner/.ccache
-          key: ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.kernel_sublevel }}-${{ inputs.os_patch_level }}
-          restore-keys: |
-            ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-
+          path: ${{ env.KERNEL_ROOT }}
+          key: kernel-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.kernel_sublevel }}-${{ inputs.os_patch_level }}
       
       # Nur wenn CCache NICHT da ist → repo init + sync
       - name: Initialize and Sync Kernel Source
@@ -166,6 +169,7 @@ jobs:
         working-directory: ${{ env.KERNEL_ROOT }}
         run: |
           set -e
+          echo "Repo init & sync…"
       
           # 🔹 Manifest-Branch = Android + Kernel + Patchlevel (OHNE Sublevel)
           FORMATTED_BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
