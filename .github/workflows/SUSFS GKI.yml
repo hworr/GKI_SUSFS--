@@ -213,26 +213,30 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y clang lld llvm
 
-    - name: Ensure SELinux flask header (GKI 6.6)
-      run: |
-        set -e
-        cd common
-
-        HEADER_DIR="security/selinux/include"
         if [ ! -f "$HEADER_DIR/flask.h" ]; then
           shopt -s nullglob
           CLANG_CANDIDATES=(prebuilts/clang/host/linux-x86/clang-*/bin)
           shopt -u nullglob
+      
           if [ ${#CLANG_CANDIDATES[@]} -eq 0 ]; then
-            echo "clang toolchain not found"
-            exit 1
-          fi
-          CLANG_BIN=$(printf '%s\n' "${CLANG_CANDIDATES[@]}" | sed -E 's|.*/clang-r([0-9]+).*| \1 &|' | sort -k1,1nr | head -n 1 | cut -d' ' -f2-)
-          if [ -z "$CLANG_BIN" ] || [ ! -d "$CLANG_BIN" ]; then
-            echo "clang toolchain not found"
-            exit 1
-          fi
-          export PATH="$PWD/$CLANG_BIN:$PATH"
+            echo "No prebuilts clang toolchain found, trying system clang..."
+            if ! command -v clang >/dev/null 2>&1; then
+              echo "clang toolchain not found (no prebuilts and no system clang on PATH)"
+              exit 1
+            fi
+            # Rely on system clang; no PATH modification needed
+          else
+            CLANG_BIN=$(printf '%s\n' "${CLANG_CANDIDATES[@]}" \
+              | sed -E 's|.*/clang-r([0-9]+).*| \1 &|' \
+              | sort -k1,1nr \
+              | head -n 1 \
+              | cut -d' ' -f2-)
+            if [ -z "$CLANG_BIN" ] || [ ! -d "$CLANG_BIN" ]; then
+              echo "clang toolchain not found (invalid prebuilts path)"
+              exit 1
+            fi
+            export PATH="$PWD/$CLANG_BIN:$PATH"
+          fi"
 
           if [ ! -f .config ]; then
             echo "Preparing kernel config for SELinux headers..."
