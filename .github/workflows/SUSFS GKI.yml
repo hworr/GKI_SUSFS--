@@ -280,10 +280,10 @@ jobs:
               echo "DEBUG: variant=$KSU_VARIANT"
           
               if [[ "$KSU_BRANCH" == "Stable" && "$KSU_VARIANT" == "SukiSU" ]]; then
-                  echo "BRANCH=-s builtin" >> $GITHUB_ENV
+                  echo "BRANCH=builtin" >> $GITHUB_ENV
           
               elif [[ "$KSU_BRANCH" == "Dev" && "$KSU_VARIANT" == "SukiSU" ]]; then
-                  echo "BRANCH=-s builtin" >> $GITHUB_ENV
+                  echo "BRANCH=builtin" >> $GITHUB_ENV
           
               elif [[ "$KSU_BRANCH" == "Other" ]]; then
                   if [[ -n "${{ inputs.kernelsu_branch_other }}" ]]; then
