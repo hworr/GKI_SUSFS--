@@ -84,8 +84,22 @@ jobs:
     - name: Apply SUSFS core patch
       working-directory: common
       run: |
-        patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch
-        rm -f fs/proc/*.rej
+        set -e
+    
+        PATCH="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
+    
+        if [ ! -f "$PATCH" ]; then
+          echo "❌ SUSFS patch not found:"
+          echo "$PATCH"
+          echo "Available patches:"
+          ls -lah "$GITHUB_WORKSPACE/susfs4ksu/kernel_patches" || true
+          exit 1
+        fi
+    
+        echo "==> Applying SUSFS core patch"
+        patch -p1 < "$PATCH"
+    
+        rm -f fs/proc/*.rej || true
 
     - name: Copy SUSFS source files
       run: |
