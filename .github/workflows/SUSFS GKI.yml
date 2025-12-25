@@ -78,79 +78,24 @@ jobs:
         git clone https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
         git clone https://github.com/MiRinChan/AnyKernel3.git
 
-    # --------------------------------------------------
-    # ✅ SUSFS FIRST (CRITICAL)
-    # --------------------------------------------------
+    - name: Add SukiSU
+      if: ${{ inputs.kernelsu_variant == 'SukiSU' }}
+      run: |
+        curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
+
     - name: Apply SUSFS core patch
       working-directory: common
       run: |
         set -e
-    
         PATCH="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
-    
-        if [ ! -f "$PATCH" ]; then
-          echo "❌ SUSFS patch not found:"
-          echo "$PATCH"
-          echo "Available patches:"
-          ls -lah "$GITHUB_WORKSPACE/susfs4ksu/kernel_patches" || true
-          exit 1
-        fi
-    
-        echo "==> Applying SUSFS core patch"
-        patch -p1 < "$PATCH"
-    
+        patch -p1 < "$PATCH" || true
         rm -f fs/proc/*.rej || true
 
-    - name: Copy SUSFS source files
+    - name: Copy SUSFS files
       run: |
-        cp -r susfs4ksu/kernel_patches/fs/* common/fs/
-        cp -r susfs4ksu/kernel_patches/include/linux/* common/include/linux/
+        cp susfs4ksu/kernel_patches/fs/* common/fs/
+        cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/
 
-        - name: Enable SUSFS (FINAL, GKI-safe)
-          run: |
-            set -e
-    
-            DEFCONFIG="common/arch/arm64/configs/gki_defconfig"
-    
-            if [ ! -f "$DEFCONFIG" ]; then
-              echo "❌ gki_defconfig not found"
-              exit 1
-            fi
-    
-            echo "==> Enabling SUSFS in gki_defconfig"
-    
-            # 🔥 Wichtig: alte Reste entfernen
-            sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
-            sed -i '/^CONFIG_KSU_SUSFS/d' "$DEFCONFIG"
-    
-            # ✅ SUSFS sauber aktivieren
-            cat >> "$DEFCONFIG" << 'EOF'
-    
-        # ==========================
-        # SUSFS (FINAL)
-        # ==========================
-        CONFIG_SUSFS=y
-        CONFIG_KSU_SUSFS=y
-        CONFIG_SUSFS_PROC=y
-        CONFIG_SUSFS_MAGIC_MOUNT=y
-        CONFIG_SUSFS_AUTO_BIND=y
-        CONFIG_SUSFS_SUS_PATH=y
-        EOF
-    
-            echo "✓ SUSFS enabled"
-            grep CONFIG_SUSFS "$DEFCONFIG" || true
-
-    # --------------------------------------------------
-    # ✅ KERNELSU (SukiSU) AFTER SUSFS
-    # --------------------------------------------------
-    - name: Add SukiSU (builtin)
-      run: |
-        curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh \
-          | bash -s builtin
-
-    # --------------------------------------------------
-    # ✅ SINGLE CONFIG MERGE (ONLY PLACE CONFIG IS TOUCHED)
-    # --------------------------------------------------
     - name: Merge kernel config (GKI safe)
       run: |
         DEFCONFIG=common/arch/arm64/configs/gki_defconfig
