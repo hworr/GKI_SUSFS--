@@ -625,6 +625,9 @@ jobs:
           echo "✓ Final KernelSU + SUSFS config applied"
           grep -E '^CONFIG_(KSU|SUSFS)' "$DEFCONFIG" || true
 
+# --------------------------------------------------
+# Kernel version / branding (UTS, localversion, stamp)
+# --------------------------------------------------
       - name: Config Kernel Name
         run: |
           set -e
@@ -633,9 +636,6 @@ jobs:
           pwd
           ls -lah
       
-          # --------------------------------------------------
-          # Fix UTS_VERSION (no cd, GKI layout)
-          # --------------------------------------------------
           CURRENT_TIME=$(date -u +"%a %b %d %H:%M:%S UTC %Y")
           echo "CURRENT_TIME=$CURRENT_TIME"
       
@@ -643,19 +643,14 @@ jobs:
             "s{UTS_VERSION=\"\\\$\\(echo \\\$UTS_VERSION \\\$CONFIG_FLAGS \\\$TIMESTAMP \\| cut -b -\\\$UTS_LEN\\)\"}{UTS_VERSION=\"#1 SMP PREEMPT $CURRENT_TIME\"}" \
             common/scripts/mkcompile_h
       
-          # --------------------------------------------------
-          # localversion / scm tweaks (safe for 6.6 GKI)
-          # --------------------------------------------------
-          sed -i '$s|echo "\$res"|echo "\$res-g8d713f9e8e7b-ab13202960"|' \
+          sed -i '$s|echo \"\\$res\"|echo \"\\$res-g8d713f9e8e7b-ab13202960\"|' \
             common/scripts/setlocalversion
       
-          # If build.sh exists → kernel/build flow
           if [ -f "build/build.sh" ]; then
             sed -i 's/-dirty//' common/scripts/setlocalversion
           else
-            # Bazel / Kleaf path
             sed -i \
-              's/build-timestamp = $(or $(KBUILD_BUILD_TIMESTAMP), $(build-timestamp-auto))/build-timestamp = "Sun Apr 20 04:20:00 UTC 2025"/' \
+              's/build-timestamp = $(or $(KBUILD_BUILD_TIMESTAMP), $(build-timestamp-auto))/build-timestamp = \"Sun Apr 20 04:20:00 UTC 2025\"/' \
               common/init/Makefile
       
             sed -i \
@@ -664,9 +659,7 @@ jobs:
       
             rm -rf common/android/abi_gki_protected_exports_*
       
-            sed -i \
-              's/-maybe-dirty//g' \
-              build/kernel/kleaf/impl/stamp.bzl
+            sed -i 's/-maybe-dirty//g' build/kernel/kleaf/impl/stamp.bzl
       
             sed -E -i \
               '/^CONFIG_LOCALVERSION=/ s/(.*)"/\1-gd7dac4b14270-ab12946699"/' \
