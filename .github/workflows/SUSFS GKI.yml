@@ -71,6 +71,31 @@ jobs:
       # --------------------------------------------------
       # REPO-WORKSPACE CACHEN
       # --------------------------------------------------
+
+      - name: Init & sync kernel repo (if cache miss)
+        if: steps.repo-cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
+          restore-keys: |
+            ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-
+            ccache-${{ inputs.android_version }}-
+            ccache-
+
+      - name: Setup ccache
+        run: |
+          ccache --max-size=10G
+          ccache --set-config=compression=true
+          ccache --zero-stats
+
+      # --------------------------------------------------
+      # REPO-WORKSPACE CACHEN
+      # --------------------------------------------------
       - name: Restore kernel repo workspace
         id: repo-cache
         uses: actions/cache@v4
@@ -79,7 +104,7 @@ jobs:
             .repo
             common
           key: repo-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
-
+          
       - name: Init & sync kernel repo (if cache miss)
         if: steps.repo-cache.outputs.cache-hit != 'true'
         run: |
