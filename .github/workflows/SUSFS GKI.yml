@@ -221,16 +221,12 @@ jobs:
         grep -E 'CONFIG_(KSU|SUSFS|CFG80211|MAC80211|USB_GADGET|BBR)' "$DEFCONFIG"
     - name: Sync gki_defconfig (savedefconfig)
       run: |
-        cd common
-        sed -i '...' security/Kconfig
-        make ARCH=arm64 savedefconfig
-        cp defconfig arch/arm64/configs/gki_defconfig
-
-        rm -rf common/security/baseband-guard || true
-        sed -i '/baseband_guard/d' common/security/Kconfig
-        sed -i '/CONFIG_BBG/d' common/arch/arm64/configs/gki_defconfig
-
-        
+         cd common
+         rm -rf security/baseband-guard || true
+         sed -i '/baseband_guard/d' security/Kconfig
+         sed -i '/CONFIG_BBG/d' arch/arm64/configs/gki_defconfig
+         make ARCH=arm64 savedefconfig
+         cp defconfig arch/arm64/configs/gki_defconfig
 
     # --------------------------------------------------
     # BUILD
