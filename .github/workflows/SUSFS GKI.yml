@@ -330,13 +330,12 @@ jobs:
         if: ${{ inputs.kernelsu_variant == 'SukiSU' }}
         run: |
           set -e
+      
           echo "==> Adding SukiSU"
-          curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash "$BRANCH"
-          
-              cd KernelSU
-          
-              # Revert known bad SukiSU commit if present
-              git revert -m 1 $(git log --grep="KSU_SUKISU" --pretty=format:"%h" -n 1) -n || true
+          curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
+      
+          cd KernelSU
+          git revert -m 1 $(git log --grep="KSU_SUKISU" --pretty=format:"%h" -n 1) -n || true
 
 
       - name: Apply SUSFS core patch (REQUIRED)
