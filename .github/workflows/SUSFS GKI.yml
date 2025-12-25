@@ -7,25 +7,9 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
-      android_version:
-        required: true
-        type: string
-        default: android15
-      kernel_version:
-        required: true
-        type: string
-        default: 6.6
       os_patch_level:
         required: true
         type: string
-      kernelsu_variant:
-        required: true
-        type: string
-        default: SukiSU
-      kernelsu_branch:
-        required: true
-        type: string
-        default: builtin
 
 jobs:
   build:
@@ -39,7 +23,7 @@ jobs:
 
     steps:
     # --------------------------------------------------
-    # SPACE + TOOLS
+    # SPACE + DEPENDENCIES
     # --------------------------------------------------
     - uses: easimon/maximize-build-space@master
       with:
@@ -50,10 +34,13 @@ jobs:
         remove-haskell: "true"
         remove-codeql: "true"
 
-    - name: Install dependencies
+    - name: Install build dependencies
       run: |
         sudo apt update
-        sudo apt install -y git curl ccache python3 build-essential bc flex bison libssl-dev
+        sudo apt install -y \
+          git curl ccache python3 \
+          build-essential bc flex bison \
+          libssl-dev libelf-dev
 
     - name: Setup ccache
       run: |
@@ -67,7 +54,7 @@ jobs:
         restore-keys: ccache-
 
     # --------------------------------------------------
-    # REPO
+    # REPO SYNC (GKI)
     # --------------------------------------------------
     - name: Install repo tool
       run: |
@@ -76,109 +63,94 @@ jobs:
         chmod +x git-repo/repo
         echo "REPO=$GITHUB_WORKSPACE/git-repo/repo" >> $GITHUB_ENV
 
-    - name: Repo init & sync
+    - name: Repo init & sync (android15-6.6)
       run: |
-        BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
+        BRANCH="android15-6.6-${{ inputs.os_patch_level }}"
         $REPO init -u https://android.googlesource.com/kernel/manifest -b common-$BRANCH
         $REPO sync -j$(nproc --all) --fail-fast
 
     # --------------------------------------------------
-    # EXTERNAL PATCHES
+    # CLONE EXTERNAL PATCHES
     # --------------------------------------------------
-    - name: Clone external repos
+    - name: Clone external repositories
       run: |
         git clone https://github.com/ShirkNeko/susfs4ksu.git
-        git clone https://github.com/ShirkNeko/SukiSU_patch.git
+        git clone https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
         git clone https://github.com/MiRinChan/AnyKernel3.git
 
     # --------------------------------------------------
-    # KernelSU (SukiSU)
-    # --------------------------------------------------
-    - name: Add SukiSU
-      if: ${{ inputs.kernelsu_variant == 'SukiSU' }}
-      run: |
-        curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh \
-          | bash -s ${{ inputs.kernelsu_branch }}
-
-    # --------------------------------------------------
-    # SUSFS
+    # ✅ SUSFS FIRST (CRITICAL)
     # --------------------------------------------------
     - name: Apply SUSFS core patch
       working-directory: common
       run: |
-        patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch || true
-        rm -f fs/proc/*.rej || true
+        patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch
+        rm -f fs/proc/*.rej
 
-    - name: Copy SUSFS files
+    - name: Copy SUSFS source files
       run: |
         cp -r susfs4ksu/kernel_patches/fs/* common/fs/
         cp -r susfs4ksu/kernel_patches/include/linux/* common/include/linux/
 
     # --------------------------------------------------
-    # ✅ SINGLE CONFIG MERGE (KSU + SUSFS + NetHunter)
+    # ✅ KERNELSU (SukiSU) AFTER SUSFS
     # --------------------------------------------------
-    - name: Merge Kernel config (GKI safe)
+    - name: Add SukiSU (builtin)
+      run: |
+        curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh \
+          | bash -s builtin
+
+    # --------------------------------------------------
+    # ✅ SINGLE CONFIG MERGE (ONLY PLACE CONFIG IS TOUCHED)
+    # --------------------------------------------------
+    - name: Merge kernel config (GKI safe)
       run: |
         DEFCONFIG=common/arch/arm64/configs/gki_defconfig
         MERGE=common/scripts/kconfig/merge_config.sh
         chmod +x "$MERGE"
 
-        cat > /tmp/nethunter.config << 'EOF'
-        # ==========================
+        cat > /tmp/gki_nethunter.config << 'EOF'
         # KernelSU
-        # ==========================
         CONFIG_KSU=y
         CONFIG_KSU_MANUAL_HOOK=y
         CONFIG_KSU_KPROBES_HOOK=n
-        
-        # ==========================
+
         # SUSFS
-        # ==========================
         CONFIG_SUSFS=y
         CONFIG_KSU_SUSFS=y
         CONFIG_SUSFS_PROC=y
         CONFIG_SUSFS_MAGIC_MOUNT=y
         CONFIG_SUSFS_AUTO_BIND=y
         CONFIG_SUSFS_SUS_PATH=y
-        
-        # ==========================
+
         # NetHunter (GKI SAFE)
-        # ==========================
-        
-        # Wireless
         CONFIG_CFG80211=m
         CONFIG_MAC80211=m
-        
-        # USB gadget + HID
+
         CONFIG_USB_GADGET=y
         CONFIG_USB_CONFIGFS=y
-        
         CONFIG_USB_NET_DRIVERS=y
         CONFIG_USB_RNDIS_HOST=m
         CONFIG_USB_NET_CDC_ECM=m
         CONFIG_USB_NET_CDC_NCM=m
-        
+
         CONFIG_USB_HID=m
         CONFIG_USB_HIDDEV=y
-        
-        # ==========================
+
         # Filesystem
-        # ==========================
         CONFIG_TMPFS_XATTR=y
         CONFIG_TMPFS_POSIX_ACL=y
-        
-        # ==========================
+
         # Network
-        # ==========================
         CONFIG_TCP_CONG_BBR=y
         CONFIG_NET_SCH_FQ=y
         CONFIG_DEFAULT_BBR=y
         EOF
 
-        "$MERGE" -m "$DEFCONFIG" /tmp/nethunter.config
+        "$MERGE" -m "$DEFCONFIG" /tmp/gki_nethunter.config
         cp .config "$DEFCONFIG"
 
-        echo "Merged config:"
+        echo "Merged config summary:"
         grep -E 'CONFIG_(KSU|SUSFS|CFG80211|MAC80211|USB_GADGET|BBR)' "$DEFCONFIG"
 
     - name: Sync gki_defconfig (savedefconfig)
@@ -186,7 +158,6 @@ jobs:
         cd common
         make ARCH=arm64 savedefconfig
         cp defconfig arch/arm64/configs/gki_defconfig
-        echo "✓ gki_defconfig synced"
 
     # --------------------------------------------------
     # BUILD
@@ -200,9 +171,8 @@ jobs:
           common/build.config.gki.aarch64
 
         if [ -x build/build.sh ]; then
-          LTO=thin \
-          BUILD_CONFIG=common/build.config.gki.aarch64 \
-          build/build.sh CC="/usr/bin/ccache clang"
+          LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 \
+            build/build.sh CC="/usr/bin/ccache clang"
         else
           tools/bazel build --config=fast //common:kernel_aarch64_dist
         fi
