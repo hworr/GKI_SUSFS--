@@ -98,6 +98,7 @@ jobs:
     # KernelSU (SUKISU)
     # --------------------------------------------------
     - name: Add SukiSU
+      working-directory: ${{ env.KERNEL_ROOT }}/common
       run: |
         curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
     # --------------------------------------------------
