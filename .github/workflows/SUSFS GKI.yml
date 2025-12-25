@@ -120,14 +120,6 @@ jobs:
       run: |
         curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
 
-    - name: Fix KernelSU SELinux includes (GKI correct)
-      run: |
-        cd common
-        for f in drivers/kernelsu/*.c; do
-          sed -i '/security\/selinux\/include\/security.h/d' "$f"
-          sed -i '/security\/selinux\/include\/objsec.h/d' "$f"
-        done
-        echo "✓ Removed SELinux internal includes from KernelSU (GKI-safe)"
     # --------------------------------------------------
     # SUSFS (PATCH ONLY – NO DEFCONFIG)
     # --------------------------------------------------
@@ -188,6 +180,56 @@ jobs:
         "$MERGE" -m "$DEFCONFIG" /tmp/gki_nethunter.config
         cp .config "$DEFCONFIG"
 
+    - name: Fix KernelSU SELinux include (GKI 6.6)
+      run: |
+        cd common
+    
+        for f in drivers/kernelsu/*.c; do
+          sed -i \
+            's|#include <security/selinux/include/security.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n#include <security/selinux/include/security.h>\n#endif|' \
+            "$f" || true
+    
+          sed -i \
+            's|#include <security/selinux/include/objsec.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n#include <security/selinux/include/objsec.h>\n#endif|' \
+            "$f" || true
+        done
+    
+        echo "✓ KernelSU SELinux headers guarded"
+
+    - name: Ensure SELinux flask header (GKI 6.6)
+      run: |
+        set -e
+        cd common
+
+        HEADER_DIR="security/selinux/include"
+        if [ ! -f "$HEADER_DIR/flask.h" ]; then
+          shopt -s nullglob
+          CLANG_CANDIDATES=(prebuilts/clang/host/linux-x86/clang-*/bin)
+          shopt -u nullglob
+          if [ ${#CLANG_CANDIDATES[@]} -eq 0 ]; then
+            echo "clang toolchain not found"
+            exit 1
+          fi
+          CLANG_BIN=$(printf '%s\n' "${CLANG_CANDIDATES[@]}" | sed -E 's|.*/clang-r([0-9]+).*| \1 &|' | sort -k1,1nr | head -n 1 | cut -d' ' -f2-)
+          if [ -z "$CLANG_BIN" ] || [ ! -d "$CLANG_BIN" ]; then
+            echo "clang toolchain not found"
+            exit 1
+          fi
+          export PATH="$PWD/$CLANG_BIN:$PATH"
+
+          if [ ! -f .config ]; then
+            echo "Preparing kernel config for SELinux headers..."
+            make LLVM=1 ARCH=arm64 gki_defconfig
+          fi
+          echo "Generating SELinux headers (flask.h)..."
+          make LLVM=1 ARCH=arm64 prepare
+
+          test -s "$HEADER_DIR/flask.h" || { echo "Failed to generate flask.h at $HEADER_DIR/flask.h. Ensure CONFIG_SECURITY_SELINUX is enabled in the kernel sources and the tree is synced."; exit 1; }
+          echo "✓ Generated flask.h via kernel prepare"
+        else
+          echo "✓ flask.h already present"
+        fi
+
     - name: Sync gki_defconfig
       run: |
         cd common
@@ -208,54 +250,57 @@ jobs:
     # --------------------------------------------------
     # BUILD
     # --------------------------------------------------
-    - name: Build kernel (keepalive safe)
+    - name: Build with retry
+      uses: nick-fields/retry@v3
+      with:
+        timeout_minutes: 90
+        max_attempts: 2
+        retry_on: timeout
+        command: |
+          set -e
+          cd "$GITHUB_WORKSPACE"
+
+          sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
+          sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64 || true
+          sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
+
+          ( while sleep 300; do echo "[keepalive] build still running at $(date -u)"; done ) &
+          KEEPALIVE_PID=$!
+          trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
+
+          if [ -f "build/build.sh" ]; then
+            LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 \
+              build/build.sh CC="/usr/bin/ccache clang"
+          else
+            tools/bazel build --config=fast //common:kernel_aarch64_dist
+          fi
+
+          kill $KEEPALIVE_PID 2>/dev/null || true
+          trap - EXIT
+
+    # --------------------------------------------------
+    # CCACHE STATS
+    # --------------------------------------------------
+    - name: Show ccache stats
+      run: ccache --show-stats
+
+# --------------------------------------------------
+# PACKAGE
+# --------------------------------------------------
+    - name: Package AnyKernel3
       run: |
         set -e
-        cd "$GITHUB_WORKSPACE"
     
-        # ---- Keepalive ----
-        ( while sleep 300; do
-            echo "[keepalive] build still running at $(date -u)"
-          done ) &
-        KEEPALIVE_PID=$!
-        trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
+        IMG=$(ls out/*/dist/Image 2>/dev/null || ls bazel-bin/common/kernel_aarch64/Image)
     
-        sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
-        sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64 || true
-        sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
+        echo "Using kernel image: $IMG"
+        cp "$IMG" AnyKernel3/Image
     
-        if [ -f "build/build.sh" ]; then
-          LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 \
-            build/build.sh CC="/usr/bin/ccache clang"
-        else
-          tools/bazel build --config=fast //common:kernel_aarch64_dist
-        fi
-    
-        kill $KEEPALIVE_PID 2>/dev/null || true
-        trap - EXIT
+        cd AnyKernel3
+        zip -r ../kernel.zip .
 
-          # --------------------------------------------------
-          # CCACHE STATS
-          # --------------------------------------------------
-          - name: Show ccache stats
-            run: ccache --show-stats
-
-          # --------------------------------------------------
-          # PACKAGE
-          # --------------------------------------------------
-        - name: Package AnyKernel3
-          run: |
-            set -e
-        
-            IMG=$(ls out/*/dist/Image 2>/dev/null || ls bazel-bin/common/kernel_aarch64/Image)
-            echo "Using kernel image: $IMG"
-        
-            cp "$IMG" AnyKernel3/Image
-            cd AnyKernel3
-            zip -r ../kernel.zip .
-
-        - name: Upload kernel artifact
-          uses: actions/upload-artifact@v4
-          with:
-            name: kernel
-            path: kernel.zip
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel
+        path: kernel.zip
