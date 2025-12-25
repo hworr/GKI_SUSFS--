@@ -10,18 +10,22 @@ on:
       android_version:
         required: true
         type: string
+        default: android15
       kernel_version:
         required: true
         type: string
+        default: 6.6
       os_patch_level:
         required: true
         type: string
       kernelsu_variant:
         required: true
         type: string
+        default: SukiSU
       kernelsu_branch:
         required: true
         type: string
+        default: builtin
 
 jobs:
   build:
@@ -46,8 +50,10 @@ jobs:
         remove-haskell: "true"
         remove-codeql: "true"
 
-    - name: Install deps
-      run: sudo apt update && sudo apt install -y git curl ccache python3
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y git curl ccache python3 build-essential bc flex bison libssl-dev
 
     - name: Setup ccache
       run: |
@@ -72,14 +78,14 @@ jobs:
 
     - name: Repo init & sync
       run: |
-        BRANCH="android15-6.6-${{ inputs.os_patch_level }}"
+        BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
         $REPO init -u https://android.googlesource.com/kernel/manifest -b common-$BRANCH
         $REPO sync -j$(nproc --all) --fail-fast
 
     # --------------------------------------------------
     # EXTERNAL PATCHES
     # --------------------------------------------------
-    - name: Clone deps
+    - name: Clone external repos
       run: |
         git clone https://github.com/ShirkNeko/susfs4ksu.git
         git clone https://github.com/ShirkNeko/SukiSU_patch.git
@@ -91,129 +97,96 @@ jobs:
     - name: Add SukiSU
       if: ${{ inputs.kernelsu_variant == 'SukiSU' }}
       run: |
-        curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s builtin
+        curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh \
+          | bash -s ${{ inputs.kernelsu_branch }}
 
     # --------------------------------------------------
     # SUSFS
     # --------------------------------------------------
-    - name: Apply SUSFS patch
+    - name: Apply SUSFS core patch
       working-directory: common
       run: |
         patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch || true
-        rm -f fs/proc/*.rej
+        rm -f fs/proc/*.rej || true
 
     - name: Copy SUSFS files
       run: |
-        cp susfs4ksu/kernel_patches/fs/* common/fs/
-        cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/
+        cp -r susfs4ksu/kernel_patches/fs/* common/fs/
+        cp -r susfs4ksu/kernel_patches/include/linux/* common/include/linux/
 
     # --------------------------------------------------
     # ✅ SINGLE CONFIG MERGE (KSU + SUSFS + NetHunter)
     # --------------------------------------------------
-    - name: Merge config (GKI-safe)
+    - name: Merge Kernel config (GKI safe)
       run: |
         DEFCONFIG=common/arch/arm64/configs/gki_defconfig
         MERGE=common/scripts/kconfig/merge_config.sh
         chmod +x "$MERGE"
 
         cat > /tmp/nethunter.config << 'EOF'
-        # KernelSU
-        CONFIG_KSU=y
-        CONFIG_KSU_MANUAL_HOOK=y
-        CONFIG_KSU_KPROBES_HOOK=n
-        
-        # SUSFS
-        CONFIG_SUSFS=y
-        CONFIG_KSU_SUSFS=y
-        CONFIG_SUSFS_PROC=y
-        CONFIG_SUSFS_MAGIC_MOUNT=y
-        CONFIG_SUSFS_AUTO_BIND=y
-        CONFIG_SUSFS_SUS_PATH=y
-        
-        # NetHunter (GKI SAFE)
-        CONFIG_CFG80211=m
-        CONFIG_MAC80211=m
-        CONFIG_USB_RNDIS_HOST=y
-        
-        # Filesystem
-        CONFIG_TMPFS_XATTR=y
-        CONFIG_TMPFS_POSIX_ACL=y
-        
-        # Network
-        CONFIG_TCP_CONG_BBR=y
-        CONFIG_NET_SCH_FQ=y
-        CONFIG_DEFAULT_BBR=y
-        EOF
+# ==========================
+# KernelSU
+# ==========================
+CONFIG_KSU=y
+CONFIG_KSU_MANUAL_HOOK=y
+CONFIG_KSU_KPROBES_HOOK=n
+
+# ==========================
+# SUSFS
+# ==========================
+CONFIG_SUSFS=y
+CONFIG_KSU_SUSFS=y
+CONFIG_SUSFS_PROC=y
+CONFIG_SUSFS_MAGIC_MOUNT=y
+CONFIG_SUSFS_AUTO_BIND=y
+CONFIG_SUSFS_SUS_PATH=y
+
+# ==========================
+# NetHunter (GKI SAFE)
+# ==========================
+
+# Wireless
+CONFIG_CFG80211=m
+CONFIG_MAC80211=m
+
+# USB gadget + HID
+CONFIG_USB_GADGET=y
+CONFIG_USB_CONFIGFS=y
+
+CONFIG_USB_NET_DRIVERS=y
+CONFIG_USB_RNDIS_HOST=m
+CONFIG_USB_NET_CDC_ECM=m
+CONFIG_USB_NET_CDC_NCM=m
+
+CONFIG_USB_HID=m
+CONFIG_USB_HIDDEV=y
+
+# ==========================
+# Filesystem
+# ==========================
+CONFIG_TMPFS_XATTR=y
+CONFIG_TMPFS_POSIX_ACL=y
+
+# ==========================
+# Network
+# ==========================
+CONFIG_TCP_CONG_BBR=y
+CONFIG_NET_SCH_FQ=y
+CONFIG_DEFAULT_BBR=y
+EOF
 
         "$MERGE" -m "$DEFCONFIG" /tmp/nethunter.config
         cp .config "$DEFCONFIG"
 
-        echo "Final config:"
-        grep -E 'CONFIG_(KSU|SUSFS|CFG80211|MAC80211|BBR)' "$DEFCONFIG"
+        echo "Merged config:"
+        grep -E 'CONFIG_(KSU|SUSFS|CFG80211|MAC80211|USB_GADGET|BBR)' "$DEFCONFIG"
 
-    - name: Sync gki_defconfig with savedefconfig (GKI fix)
+    - name: Sync gki_defconfig (savedefconfig)
       run: |
-        set -e
         cd common
-    
         make ARCH=arm64 savedefconfig
-    
         cp defconfig arch/arm64/configs/gki_defconfig
-    
         echo "✓ gki_defconfig synced"
-        grep -E 'CONFIG_(KSU|SUSFS|CFG80211|MAC80211|BBR)' arch/arm64/configs/gki_defconfig || true
-
-    - name: Add NetHunter USB + HID (GKI safe)
-      run: |
-        set -e
-
-        DEFCONFIG="common/arch/arm64/configs/gki_defconfig"
-
-        if [ ! -f "$DEFCONFIG" ]; then
-          echo "❌ gki_defconfig not found"
-          exit 1
-        fi
-
-        echo "Cleaning old NetHunter entries..."
-        sed -i '/^CONFIG_USB_/d' "$DEFCONFIG"
-        sed -i '/^CONFIG_CFG80211/d' "$DEFCONFIG"
-        sed -i '/^CONFIG_MAC80211/d' "$DEFCONFIG"
-
-        cat >> "$DEFCONFIG" <<'EOF'
-    # ==========================
-    # NetHunter USB + HID (GKI)
-    # ==========================
-    
-        CONFIG_USB_GADGET=y
-        CONFIG_USB_CONFIGFS=y
-        
-        CONFIG_USB_NET_DRIVERS=y
-        CONFIG_USB_RNDIS_HOST=m
-        CONFIG_USB_NET_CDC_ECM=m
-        CONFIG_USB_NET_CDC_NCM=m
-        
-        CONFIG_USB_HID=m
-        CONFIG_USB_HIDDEV=y
-        
-        CONFIG_CFG80211=m
-        CONFIG_MAC80211=m
-        EOF
-    
-        echo "✓ NetHunter USB + HID config applied"
-          tail -n 40 "$DEFCONFIG"
-
-    - name: Sanitize gki_defconfig (remove broken heredoc garbage)
-      run: |
-        set -e
-        DEFCONFIG="common/arch/arm64/configs/gki_defconfig"
-    
-        # Remove accidental bash leftovers
-        sed -i '/^EOF$/d' "$DEFCONFIG"
-        sed -i '/NetHunter USB/d' "$DEFCONFIG"
-        sed -i '/tail -n/d' "$DEFCONFIG"
-        sed -i '/echo "✓/d' "$DEFCONFIG"
-    
-        echo "✓ gki_defconfig sanitized"
 
     # --------------------------------------------------
     # BUILD
@@ -227,7 +200,9 @@ jobs:
           common/build.config.gki.aarch64
 
         if [ -x build/build.sh ]; then
-          LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh CC="/usr/bin/ccache clang"
+          LTO=thin \
+          BUILD_CONFIG=common/build.config.gki.aarch64 \
+          build/build.sh CC="/usr/bin/ccache clang"
         else
           tools/bazel build --config=fast //common:kernel_aarch64_dist
         fi
@@ -235,7 +210,7 @@ jobs:
     # --------------------------------------------------
     # PACKAGE
     # --------------------------------------------------
-    - name: AnyKernel3
+    - name: Package AnyKernel3
       run: |
         IMG=$(ls out/*/dist/Image 2>/dev/null || ls bazel-bin/common/kernel_aarch64/Image)
         cp "$IMG" AnyKernel3/Image
