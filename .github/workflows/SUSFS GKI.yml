@@ -675,49 +675,38 @@ jobs:
       
           echo "✓ Kernel version branding applied"
 
-      - name: Build with retry
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 30
-          max_attempts: 3
-          retry_on: timeout
-          command: |
-            set -e
-            set -x
-      
-            echo "KERNEL_ROOT=$KERNEL_ROOT"
-      
-            if [ ! -d "$KERNEL_ROOT" ]; then
-              echo "❌ KERNEL_ROOT does not exist"
-              ls -lah
-              exit 1
-            fi
-      
-            cd "$KERNEL_ROOT"
-      
-            echo "Building the kernel..."
-      
-            # replace BUILD_SYSTEM_DLKM=1 with BUILD_SYSTEM_DLKM=0
-            sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64
-      
-            # delete MODULES_ORDER
-            sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64
-      
-            # disable strict KMI
-            sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64
-      
-            if [ -f "build/build.sh" ]; then
-              LTO=thin \
-              BUILD_CONFIG=common/build.config.gki.aarch64 \
-              build/build.sh CC="/usr/bin/ccache clang"
-            else
-              tools/bazel build \
-                --disk_cache=/home/runner/.cache/bazel \
-                --config=fast \
-                //common:kernel_aarch64_dist
-            fi
-      
-            ccache --show-stats
+          - name: Build with retry
+            uses: nick-fields/retry@v3
+            with:
+              timeout_minutes: 30
+              max_attempts: 3
+              retry_on: timeout
+              command: |
+                set -e
+                set -x
+          
+                echo "Working dir:"
+                pwd
+                ls -lah
+          
+                echo "Building the kernel..."
+          
+                sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64
+                sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64
+                sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64
+          
+                if [ -f build/build.sh ]; then
+                  LTO=thin \
+                  BUILD_CONFIG=common/build.config.gki.aarch64 \
+                  build/build.sh CC="/usr/bin/ccache clang"
+                else
+                  tools/bazel build \
+                    --disk_cache=/home/runner/.cache/bazel \
+                    --config=fast \
+                    //common:kernel_aarch64_dist
+                fi
+          
+                ccache --show-stats
 
       - name: Patch Image File A12 & A13
         if: ${{ inputs.android_version == 'android12' || inputs.android_version == 'android13' }}
