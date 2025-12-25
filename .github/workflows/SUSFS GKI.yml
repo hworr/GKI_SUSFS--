@@ -129,23 +129,6 @@ jobs:
               "$f" || true
           done
 
-          echo "✓ KernelSU SELinux headers guarded"
-
-      - name: Fake prebuilts clang toolchain pointing to system clang
-        run: |
-          set -e
-          mkdir -p common/prebuilts/clang/host/linux-x86/clang-r0000/bin
-
-          # symlink system clang into the expected prebuilts path
-          ln -sf "$(command -v clang)" common/prebuilts/clang/host/linux-x86/clang-r0000/bin/clang
-
-          # Wenn weitere Tools erwartet werden (clang++, ld.lld, llvm-*), ebenfalls verlinken
-          for tool in clang++ ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip; do
-            if command -v "$tool" >/dev/null 2>&1; then
-              ln -sf "$(command -v "$tool")" "common/prebuilts/clang/host/linux-x86/clang-r0000/bin/$tool"
-            fi
-          done
-
       - name: Install clang for kernel build & generate flask.h if needed
         run: |
           set -e
