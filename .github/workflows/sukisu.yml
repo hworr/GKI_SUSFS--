@@ -144,10 +144,11 @@ jobs:
     # --------------------------------------------------
     #  Disable GKI defconfig check
     # --------------------------------------------------
-
     - name: Disable GKI defconfig check
       run: |
-        sed -i '/check_defconfig/d' common/BUILD.bazel
+        set -e
+        sed -i 's/check_defconfig = True/check_defconfig = False/' common/BUILD.bazel || true
+        sed -i 's/check_defconfig=True/check_defconfig=False/' common/BUILD.bazel || true
     
     # --------------------------------------------------
     # BUILD
