@@ -542,8 +542,8 @@ jobs:
 
       - name: Add Configuration Settings
         run: |
-          echo "Changing to configuration directory: $CONFIG..."
-          cd "$CONFIG"
+          echo "Changing to kernel root: $KERNEL_ROOT"
+          cd "$KERNEL_ROOT"
 
           echo "Adding configuration settings to gki_defconfig..."
 
