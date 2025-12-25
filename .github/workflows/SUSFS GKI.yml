@@ -232,19 +232,6 @@ jobs:
               make -C common LLVM=1 ARCH=arm64 gki_defconfig
             fi
 
-            echo "Generating SELinux headers (flask.h)..."
-            make -C common LLVM=1 ARCH=arm64 prepare
-
-            test -s "$HEADER_DIR/flask.h" || {
-              echo "Failed to generate flask.h. Ensure CONFIG_SECURITY_SELINUX is enabled."
-              exit 1
-            }
-
-            echo "✓ Generated flask.h via kernel prepare"
-          else
-            echo "✓ flask.h already present"
-          fi
-
       # --------------------------------------------------
       # GKI DEFCONFIG MERGE
       # --------------------------------------------------
