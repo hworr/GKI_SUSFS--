@@ -152,6 +152,52 @@ jobs:
               "$f" || true
           done
 
+              # --------------------------------------------------
+    # DEPENDENCIES
+    # --------------------------------------------------
+    - name: Clone SUSFS + AnyKernel3
+      run: |
+        git clone https://github.com/ShirkNeko/susfs4ksu.git -b gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}
+        git clone https://github.com/MiRinChan/AnyKernel3.git
+
+    # --------------------------------------------------
+    # KERNELSU BRANCH
+    # --------------------------------------------------
+    - name: Determine KernelSU branch
+      run: |
+        if [[ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]]; then
+          if [[ "${{ inputs.kernelsu_branch }}" == "Other" ]]; then
+            echo "BRANCH=${{ inputs.kernelsu_branch_other }}" >> $GITHUB_ENV
+          else
+            echo "BRANCH=builtin" >> $GITHUB_ENV
+          fi
+        fi
+
+    # --------------------------------------------------
+    # KERNELSU (SUKISU)
+    # --------------------------------------------------
+    - name: Add SukiSU
+      if: ${{ inputs.kernelsu_variant == 'SukiSU' }}
+      run: |
+        curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
+
+    # --------------------------------------------------
+    # SUSFS (PATCH ONLY – NO DEFCONFIG)
+    # --------------------------------------------------
+    - name: Apply SUSFS core patch
+      working-directory: common
+      run: |
+        set -e
+        PATCH="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
+        patch -p1 < "$PATCH" || true
+        rm -f fs/proc/*.rej || true
+
+    - name: Copy SUSFS files
+      run: |
+        cp susfs4ksu/kernel_patches/fs/* common/fs/
+        cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/
+        
+
       - name: Install clang for kernel build & generate flask.h if needed
         run: |
           set -e
@@ -208,6 +254,50 @@ jobs:
           else
             echo "✓ flask.h already present"
           fi
+
+              # --------------------------------------------------
+              # GKI DEFCONFIG SANITIZER (ABSOLUT KRITISCH)
+              # --------------------------------------------------
+              - name: Merge kernel config (GKI safe)
+                run: |
+                  DEFCONFIG=common/arch/arm64/configs/gki_defconfig
+                  MERGE=common/scripts/kconfig/merge_config.sh
+                  chmod +x "$MERGE"
+              
+                  cat > /tmp/gki_nethunter.config << 'EOF'
+                  CONFIG_KSU=y
+                  CONFIG_KSU_MANUAL_HOOK=y
+                  CONFIG_KSU_KPROBES_HOOK=n
+              
+                  CONFIG_SUSFS=y
+                  CONFIG_KSU_SUSFS=y
+                  CONFIG_SUSFS_PROC=y
+                  CONFIG_SUSFS_MAGIC_MOUNT=y
+                  CONFIG_SUSFS_AUTO_BIND=y
+                  CONFIG_SUSFS_SUS_PATH=y
+              
+                  CONFIG_CFG80211=m
+                  CONFIG_MAC80211=m
+              
+                  CONFIG_USB_GADGET=y
+                  CONFIG_USB_CONFIGFS=y
+                  CONFIG_USB_NET_DRIVERS=y
+                  CONFIG_USB_RNDIS_HOST=m
+                  CONFIG_USB_NET_CDC_ECM=m
+                  CONFIG_USB_NET_CDC_NCM=m
+                  CONFIG_USB_HID=m
+                  CONFIG_USB_HIDDEV=y
+              
+                  CONFIG_TMPFS_XATTR=y
+                  CONFIG_TMPFS_POSIX_ACL=y
+              
+                  CONFIG_TCP_CONG_BBR=y
+                  CONFIG_NET_SCH_FQ=y
+                  CONFIG_DEFAULT_BBR=y
+                  EOF
+              
+                  "$MERGE" -m "$DEFCONFIG" /tmp/gki_nethunter.config
+                  cp .config "$DEFCONFIG"
 
       - name: Sync gki_defconfig (remove baseband guard)
         run: |
