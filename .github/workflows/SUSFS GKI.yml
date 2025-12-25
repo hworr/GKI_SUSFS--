@@ -418,11 +418,31 @@ jobs:
         run: |
           set -e
 
-          # Versuche zuerst out/*/dist/Image, ansonsten Bazel-Ausgabe
+          # Kernel Image finden
           IMG=$(ls out/*/dist/Image 2>/dev/null || ls bazel-bin/common/kernel_aarch64/Image)
-
           echo "Using kernel image: $IMG"
           cp "$IMG" AnyKernel3/Image
+
+          # WiFi/BT Module sammeln (WICHTIG für WLAN/BT!)
+          echo "Collecting WiFi/BT modules..."
+          mkdir -p AnyKernel3/modules/vendor/lib/modules
+          
+          # Module aus Build-Output kopieren
+          if [ -d "out/android15-6.6/dist" ]; then
+            find out/android15-6.6/dist -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
+          fi
+          
+          # Wichtige Module explizit suchen
+          for mod in cfg80211.ko mac80211.ko wlan.ko bluetooth.ko; do
+            find out -name "$mod" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
+          done
+
+          MODULE_COUNT=$(find AnyKernel3/modules -name "*.ko" 2>/dev/null | wc -l)
+          echo "Found $MODULE_COUNT kernel modules"
+          
+          if [ "$MODULE_COUNT" -eq 0 ]; then
+            echo "⚠️ WARNING: No kernel modules found! WiFi/BT may not work!"
+          fi
 
           cd AnyKernel3
           zip -r ../kernel.zip .
