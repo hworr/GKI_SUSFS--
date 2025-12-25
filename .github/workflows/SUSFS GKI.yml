@@ -626,31 +626,42 @@ jobs:
           grep -E '^CONFIG_(KSU|SUSFS)' "$DEFCONFIG" || true
 
 
-      - name: Apply SukiSU + SUSFS config fragment (GKI safe)
+      - name: Apply SukiSU + SUSFS config (inline, GKI safe)
         run: |
           set -e
       
-          echo "Applying GKI-safe config fragment..."
+          echo "Applying SukiSU + SUSFS config..."
       
           DEFCONFIG="common/arch/arm64/configs/gki_defconfig"
-          FRAGMENT="./kernel/configs/sukisu_susfs.fragment"
       
           if [ ! -f "$DEFCONFIG" ]; then
             echo "❌ gki_defconfig not found"
             exit 1
           fi
       
-          if [ ! -f "$FRAGMENT" ]; then
-            echo "❌ Fragment not found: $FRAGMENT"
-            echo "Available files:"
-            find kernel -type f || true
-            exit 1
-          fi
+          echo "Cleaning old entries..."
+          sed -i '/^CONFIG_KSU/d' "$DEFCONFIG"
+          sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
       
-          cat "$FRAGMENT" >> "$DEFCONFIG"
+          echo "Appending config..."
       
-          echo "✓ Fragment applied"
-          echo "Last lines:"
+          cat >> "$DEFCONFIG" << 'EOF'
+          CONFIG_KSU=y
+          CONFIG_KSU_MANUAL_HOOK=y
+          CONFIG_KSU_KPROBES_HOOK=n
+          
+          CONFIG_SUSFS=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_SUSFS_PROC=y
+          CONFIG_SUSFS_MAGIC_MOUNT=y
+          CONFIG_SUSFS_AUTO_BIND=y
+          CONFIG_SUSFS_SUS_PATH=y
+          
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          EOF
+
+          echo "✓ Config applied"
           tail -n 20 "$DEFCONFIG"
 
       - name: Config Kernel Name
