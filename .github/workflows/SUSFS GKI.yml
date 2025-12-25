@@ -542,8 +542,22 @@ jobs:
 
       - name: Add Configuration Settings
         run: |
-          echo "Changing to kernel root: $KERNEL_ROOT"
-          cd "$KERNEL_ROOT"
+          echo "Workspace:"
+          pwd
+          ls -lah
+          
+          # Fallback: Kernel Root automatisch finden
+          if [ -d "$KERNEL_ROOT/common" ]; then
+            echo "Using KERNEL_ROOT=$KERNEL_ROOT"
+            cd "$KERNEL_ROOT"
+          elif [ -d "android15-6.6-98/common" ]; then
+            echo "Using local android15-6.6-98"
+            cd android15-6.6-98
+          else
+            echo "❌ Kernel root not found"
+            find . -maxdepth 2 -type d
+            exit 1
+          fi
     
           DEFCONFIG=./common/arch/arm64/configs/gki_defconfig
       
