@@ -1,0 +1,10 @@
+@@
+-#include <security/selinux/include/security.h>
++#if IS_ENABLED(CONFIG_SECURITY_SELINUX)
++#include <security/selinux/include/security.h>
++#endif
+@@
+-#include <security/selinux/include/objsec.h>
++#if IS_ENABLED(CONFIG_SECURITY_SELINUX)
++#include <security/selinux/include/objsec.h>
++#endif
