@@ -73,118 +73,6 @@ jobs:
     # --------------------------------------------------
     - name: Install repo tool
       run: |
-        mkdir -p git-repo
-        curl https://storage.googleapis.com/git-repo-downloads/repo > git-repo/repo
-        chmod +x git-repo/repo
-        echo "REPO=$GITHUB_WORKSPACE/git-repo/repo" >> $GITHUB_ENV
-
-    - name: Repo init & sync (GKI)
-      run: |
-        set -e
-        BRANCH="android15-6.6-${{ inputs.os_patch_level }}"
-        $REPO init -u https://android.googlesource.com/kernel/manifest -b common-$BRANCH
-        $REPO sync -j$(nproc --all) --fail-fast
-
-        # Cleanup Baseband-Guard if present
-        rm -rf common/security/baseband-guard || true
-        sed -i '/baseband_guard/d' common/security/Kconfig
-        sed -i '/CONFIG_BBG/d' common/arch/arm64/configs/gki_defconfig
-        sed -i 's/,baseband_guard//g' common/arch/arm64/configs/gki_defconfig
-
-    # --------------------------------------------------
-    # DEPENDENCIES
-    # --------------------------------------------------
-    - name: Clone SUSFS + AnyKernel3
-      run: |
-        git clone https://github.com/ShirkNeko/susfs4ksu.git -b gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}
-        git clone https://github.com/MiRinChan/AnyKernel3.git
-
-    # --------------------------------------------------
-    # KERNELSU BRANCH
-    # --------------------------------------------------
-    - name: Determine KernelSU branch
-      run: |
-        if [[ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]]; then
-          if [[ "${{ inputs.kernelsu_branch }}" == "Other" ]]; then
-            echo "BRANCH=${{ inputs.kernelsu_branch_other }}" >> $GITHUB_ENV
-          else
-            echo "BRANCH=builtin" >> $GITHUB_ENV
-          fi
-        fi
-
-    # --------------------------------------------------
-    # KERNELSU (SUKISU)
-    # --------------------------------------------------
-    - name: Add SukiSU
-      if: ${{ inputs.kernelsu_variant == 'SukiSU' }}
-      run: |
-        curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
-
-    # --------------------------------------------------
-    # SUSFS (PATCH ONLY – NO DEFCONFIG)
-    # --------------------------------------------------
-    - name: Apply SUSFS core patch
-      working-directory: common
-      run: |
-        set -e
-        PATCH="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
-        patch -p1 < "$PATCH" || true
-        rm -f fs/proc/*.rej || true
-
-    - name: Copy SUSFS files
-      run: |
-        cp susfs4ksu/kernel_patches/fs/* common/fs/
-        cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/
-
-    # --------------------------------------------------
-    # GKI DEFCONFIG SANITIZER (ABSOLUT KRITISCH)
-    # --------------------------------------------------
-    - name: Merge kernel config (GKI safe)
-      run: |
-        DEFCONFIG=common/arch/arm64/configs/gki_defconfig
-        MERGE=common/scripts/kconfig/merge_config.sh
-        chmod +x "$MERGE"
-    
-        cat > /tmp/gki_nethunter.config << 'EOF'
-        CONFIG_KSU=y
-        CONFIG_KSU_MANUAL_HOOK=y
-        CONFIG_KSU_KPROBES_HOOK=n
-    
-        CONFIG_SUSFS=y
-        CONFIG_KSU_SUSFS=y
-        CONFIG_SUSFS_PROC=y
-        CONFIG_SUSFS_MAGIC_MOUNT=y
-        CONFIG_SUSFS_AUTO_BIND=y
-        CONFIG_SUSFS_SUS_PATH=y
-    
-        CONFIG_CFG80211=m
-        CONFIG_MAC80211=m
-    
-        CONFIG_USB_GADGET=y
-        CONFIG_USB_CONFIGFS=y
-        CONFIG_USB_NET_DRIVERS=y
-        CONFIG_USB_RNDIS_HOST=m
-        CONFIG_USB_NET_CDC_ECM=m
-        CONFIG_USB_NET_CDC_NCM=m
-        CONFIG_USB_HID=m
-        CONFIG_USB_HIDDEV=y
-    
-        CONFIG_TMPFS_XATTR=y
-        CONFIG_TMPFS_POSIX_ACL=y
-    
-        CONFIG_TCP_CONG_BBR=y
-        CONFIG_NET_SCH_FQ=y
-        CONFIG_DEFAULT_BBR=y
-        EOF
-    
-        "$MERGE" -m "$DEFCONFIG" /tmp/gki_nethunter.config
-        cp .config "$DEFCONFIG"
-
-    - name: Fix KernelSU SELinux include (GKI 6.6)
-      run: |
-        cd common
-    
-        for f in drivers/kernelsu/*.c; do
           sed -i \
             's|#include <security/selinux/include/security.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n#include <security/selinux/include/security.h>\n#endif|' \
             "$f" || true
@@ -212,10 +100,11 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y clang lld llvm
+        HEADER_DIR="common/security/selinux/include"
 
         if [ ! -f "$HEADER_DIR/flask.h" ]; then
           shopt -s nullglob
-          CLANG_CANDIDATES=(prebuilts/clang/host/linux-x86/clang-*/bin)
+          CLANG_CANDIDATES=(common/prebuilts/clang/host/linux-x86/clang-*/bin)
           shopt -u nullglob
       
           if [ ${#CLANG_CANDIDATES[@]} -eq 0 ]; then
@@ -236,14 +125,14 @@ jobs:
               exit 1
             fi
             export PATH="$PWD/$CLANG_BIN:$PATH"
-          fi"
+          fi
 
-          if [ ! -f .config ]; then
+          if [ ! -f common/.config ]; then
             echo "Preparing kernel config for SELinux headers..."
-            make LLVM=1 ARCH=arm64 gki_defconfig
+            make -C common LLVM=1 ARCH=arm64 gki_defconfig
           fi
           echo "Generating SELinux headers (flask.h)..."
-          make LLVM=1 ARCH=arm64 prepare
+          make -C common LLVM=1 ARCH=arm64 prepare
 
           test -s "$HEADER_DIR/flask.h" || { echo "Failed to generate flask.h at $HEADER_DIR/flask.h. Ensure CONFIG_SECURITY_SELINUX is enabled in the kernel sources and the tree is synced."; exit 1; }
           echo "✓ Generated flask.h via kernel prepare"
