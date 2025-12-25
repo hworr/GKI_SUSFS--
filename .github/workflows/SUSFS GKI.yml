@@ -639,8 +639,8 @@ jobs:
             exit 1
           fi
       
-          echo "Appending fragment: kernel/configs/sukisu_susfs.fragment"
-          cat kernel/configs/sukisu_susfs.fragment >> "$DEFCONFIG"
+          - cat kernel/configs/sukisu_susfs.fragment >> "$DEFCONFIG"
+          + cat ./kernel/configs/sukisu_susfs.fragment >> "$DEFCONFIG"
       
           echo "✓ Fragment applied"
           echo "Last lines:"
