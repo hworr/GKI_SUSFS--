@@ -205,7 +205,7 @@ jobs:
         "$MERGE" -m "$DEFCONFIG" /tmp/gki_nethunter.config
         cp .config "$DEFCONFIG"
 
-    - name: KernelSU SELinux guard (GKI fix)
+    - name: Fix KernelSU SELinux include (GKI 6.6)
       run: |
         cd common
     
@@ -219,7 +219,7 @@ jobs:
             "$f" || true
         done
     
-        echo "✓ KernelSU SELinux guarded"
+        echo "✓ KernelSU SELinux headers guarded"
 
     - name: Sync gki_defconfig
       run: |
@@ -245,7 +245,7 @@ jobs:
       uses: nick-fields/retry@v3
       with:
         timeout_minutes: 30
-        max_attempts: 3
+        max_attempts: 4
         retry_on: timeout
         command: |
           set -e
