@@ -163,48 +163,57 @@ jobs:
         echo "✓ gki_defconfig synced"
         grep -E 'CONFIG_(KSU|SUSFS|CFG80211|MAC80211|BBR)' arch/arm64/configs/gki_defconfig || true
 
-    - name: Add NetHunter USB + HID support (GKI safe)
+    - name: Add NetHunter USB + HID (GKI safe)
       run: |
         set -e
-    
-        echo "Adding NetHunter USB + HID (GKI safe)…"
-    
+
         DEFCONFIG="common/arch/arm64/configs/gki_defconfig"
-    
+
         if [ ! -f "$DEFCONFIG" ]; then
           echo "❌ gki_defconfig not found"
           exit 1
         fi
 
-        # Cleanup first (VERY important)
+        echo "Cleaning old NetHunter entries..."
         sed -i '/^CONFIG_USB_/d' "$DEFCONFIG"
         sed -i '/^CONFIG_CFG80211/d' "$DEFCONFIG"
         sed -i '/^CONFIG_MAC80211/d' "$DEFCONFIG"
+
+        cat >> "$DEFCONFIG" <<'EOF'
+    # ==========================
+    # NetHunter USB + HID (GKI)
+    # ==========================
     
-        cat >> "$DEFCONFIG" << 'EOF'
-    
-        # USB gadget framework
         CONFIG_USB_GADGET=y
         CONFIG_USB_CONFIGFS=y
-          
-        # USB networking
+        
         CONFIG_USB_NET_DRIVERS=y
         CONFIG_USB_RNDIS_HOST=m
         CONFIG_USB_NET_CDC_ECM=m
         CONFIG_USB_NET_CDC_NCM=m
-          
-        # HID
+        
         CONFIG_USB_HID=m
         CONFIG_USB_HIDDEV=y
-          
-        # Wireless (injection support)
+        
         CONFIG_CFG80211=m
         CONFIG_MAC80211=m
-          
-          EOF
-      
-          echo "✓ NetHunter USB + HID config applied"
+        EOF
+    
+        echo "✓ NetHunter USB + HID config applied"
           tail -n 40 "$DEFCONFIG"
+
+    - name: Sanitize gki_defconfig (remove broken heredoc garbage)
+      run: |
+        set -e
+        DEFCONFIG="common/arch/arm64/configs/gki_defconfig"
+    
+        # Remove accidental bash leftovers
+        sed -i '/^EOF$/d' "$DEFCONFIG"
+        sed -i '/NetHunter USB/d' "$DEFCONFIG"
+        sed -i '/tail -n/d' "$DEFCONFIG"
+        sed -i '/echo "✓/d' "$DEFCONFIG"
+    
+        echo "✓ gki_defconfig sanitized"
 
     # --------------------------------------------------
     # BUILD
