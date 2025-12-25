@@ -52,7 +52,7 @@ jobs:
       # --------------------------------------------------
       # CCACHE
       # --------------------------------------------------
-      - name: Restore ccache
+           - name: Restore ccache
         uses: actions/cache@v4
         with:
           path: /home/runner/.ccache
@@ -67,9 +67,21 @@ jobs:
           ccache --max-size=10G
           ccache --set-config=compression=true
           ccache --zero-stats
-      
-      # Nur wenn Cache NICHT da ist → repo init + sync
-      - name: Init & sync kernel repo
+
+      # --------------------------------------------------
+      # REPO-WORKSPACE CACHEN
+      # --------------------------------------------------
+      - name: Restore kernel repo workspace
+        id: repo-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .repo
+            common
+          key: repo-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
+
+      - name: Init & sync kernel repo (if cache miss)
+        if: steps.repo-cache.outputs.cache-hit != 'true'
         run: |
           set -e
 
@@ -79,9 +91,7 @@ jobs:
           curl -o "$REPO_BIN" https://storage.googleapis.com/git-repo-downloads/repo
           chmod a+x "$REPO_BIN"
 
-          # Variable für bequemere Nutzung
           REPO="$REPO_BIN"
-
           FORMATTED_BRANCH="android15-6.6-2025-09"
 
           echo "==> repo init"
@@ -96,6 +106,19 @@ jobs:
 
           echo "==> repo sync"
           "$REPO" sync -j"$(nproc --all)" --fail-fast
+
+      - name: Verify kernel repo workspace
+        run: |
+          set -e
+          if [ ! -d common ]; then
+            echo "common/ directory not found after repo restore/sync"
+            exit 1
+          fi
+          if [ ! -d .repo ]; then
+            echo ".repo/ directory not found after repo restore/sync"
+            exit 1
+          fi
+          echo "✓ Kernel repo workspace ready (from cache or fresh sync)"
 
           # Alle relevanten Dateien finden, in denen die Includes vorkommen
           files=$(grep -rl "security/selinux/include/security.h" common 2>/dev/null || true)
