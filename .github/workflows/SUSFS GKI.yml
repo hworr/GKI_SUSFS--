@@ -578,17 +578,15 @@ jobs:
       
           echo "✓ Configuration step finished"
       
-          # === NetHunter modules only (GKI-safe) ===
-          sed -i '/name = "kernel_aarch64",/,/)/{
-            /module_outs = \[/!{
-              /)/i\
-                module_outs = [\
-                  "net/wireless/cfg80211.ko",\
-                  "net/mac80211/mac80211.ko",\
-                  "drivers/net/usb/rndis_host.ko",\
-                ],\
-            }
-          }' common/BUILD.bazel
+          # --- GKI-safe NetHunter modules ---
+            if ! grep -q 'module_outs' common/BUILD.bazel; then
+              sed -i '/name = "kernel_aarch64"/,/)/ s/)/  module_outs = [\
+                "net\/wireless\/cfg80211.ko",\
+                "net\/mac80211\/mac80211.ko",\
+                "drivers\/net\/usb\/rndis_host.ko",\
+              ],\
+            )/' common/BUILD.bazel
+            fi
     
       - name: Final KernelSU + SUSFS config
         working-directory: ${{ env.KERNEL_ROOT }}
