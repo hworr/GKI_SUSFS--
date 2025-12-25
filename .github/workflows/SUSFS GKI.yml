@@ -298,9 +298,9 @@ jobs:
               fi
 
    
-      - name: Add BBG
-        working-directory: ${{ env.KERNEL_ROOT }}
+      - name: Apply Baseband Guard
         run: |
+          set -e
           curl -LSs https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
           echo "CONFIG_BBG=y" >> common/arch/arm64/configs/gki_defconfig
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/lockdown/lockdown,baseband_guard/ } }' common/security/Kconfig
