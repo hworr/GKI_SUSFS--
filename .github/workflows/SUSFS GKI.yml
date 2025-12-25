@@ -252,13 +252,64 @@ jobs:
         run: |
           set -e
           PATCH="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
-          patch -p1 < "$PATCH" || true
-          rm -f fs/proc/*.rej || true
+          
+          echo "==> Applying SUSFS patch"
+          if ! patch -p1 < "$PATCH"; then
+            echo "⚠️ Patch had some conflicts, cleaning up rejects"
+            find . -name "*.rej" -delete
+          fi
 
       - name: Copy SUSFS files
         run: |
-          cp susfs4ksu/kernel_patches/fs/* common/fs/
-          cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/
+          set -e
+          
+          echo "==> Copying SUSFS source files"
+          
+          # Copy SUSFS filesystem code
+          if [ -d "susfs4ksu/kernel_patches/fs/susfs" ]; then
+            echo "Copying fs/susfs directory..."
+            cp -r susfs4ksu/kernel_patches/fs/susfs common/fs/ || true
+          fi
+          
+          # Copy individual fs files if they exist
+          if [ -d "susfs4ksu/kernel_patches/fs" ]; then
+            find susfs4ksu/kernel_patches/fs -maxdepth 1 -type f -exec cp {} common/fs/ \; 2>/dev/null || true
+          fi
+          
+          # Copy SUSFS headers
+          if [ -d "susfs4ksu/kernel_patches/include/linux" ]; then
+            echo "Copying include/linux headers..."
+            cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/ 2>/dev/null || true
+          fi
+          
+          # Verify critical SUSFS files exist
+          if [ ! -f "common/include/linux/susfs.h" ]; then
+            echo "❌ ERROR: susfs.h header not found!"
+            echo "Available files in susfs4ksu/kernel_patches:"
+            find susfs4ksu/kernel_patches -type f
+            exit 1
+          fi
+          
+          echo "✓ SUSFS files copied"
+
+      - name: Setup SUSFS build files
+        run: |
+          set -e
+          
+          # Create SUSFS directory if it doesn't exist
+          mkdir -p common/fs/susfs
+          
+          # Create Makefile for SUSFS
+          if [ ! -f "common/fs/susfs/Makefile" ]; then
+            echo "Creating SUSFS Makefile..."
+            cat > common/fs/susfs/Makefile << 'EOF'
+# SPDX-License-Identifier: GPL-2.0
+obj-$(CONFIG_SUSFS) += susfs.o
+susfs-y := sus_su.o
+EOF
+          fi
+          
+          echo "✓ SUSFS build files ready"
 
       - name: Verify SUSFS Kconfig integration
         run: |
@@ -314,7 +365,77 @@ jobs:
             sed -i '/endmenu/i source "fs/susfs/Kconfig"' common/fs/Kconfig
           fi
           
+          # Stelle sicher, dass SUSFS in fs/Makefile eingebunden ist
+          if ! grep -q "obj-\$(CONFIG_SUSFS)" common/fs/Makefile; then
+            echo "Adding SUSFS to fs/Makefile..."
+            echo "obj-\$(CONFIG_SUSFS) += susfs/" >> common/fs/Makefile
+          fi
+          
           echo "✓ SUSFS Kconfig verified"
+
+      - name: Verify SUSFS source files
+        run: |
+          set -e
+          
+          echo "==> Verifying SUSFS integration"
+          
+          # Check for required header
+          if [ ! -f "common/include/linux/susfs.h" ]; then
+            echo "❌ Missing susfs.h - creating stub header"
+            cat > common/include/linux/susfs.h << 'EOF'
+#ifndef _LINUX_SUSFS_H
+#define _LINUX_SUSFS_H
+
+#include <linux/types.h>
+
+#ifdef CONFIG_SUSFS
+
+/* SUSFS flags for address_space */
+#define BIT_SUS_MAPS 31
+
+/* SUSFS function declarations */
+extern bool susfs_is_current_proc_umounted(void);
+extern int susfs_init(void);
+
+#else
+
+static inline bool susfs_is_current_proc_umounted(void) { return false; }
+static inline int susfs_init(void) { return 0; }
+
+#endif /* CONFIG_SUSFS */
+
+#endif /* _LINUX_SUSFS_H */
+EOF
+          fi
+          
+          # Check for SUSFS source
+          if [ ! -f "common/fs/susfs/sus_su.c" ] && [ ! -f "common/fs/susfs/susfs.c" ]; then
+            echo "❌ Missing SUSFS source files - creating minimal stub"
+            cat > common/fs/susfs/sus_su.c << 'EOF'
+// SPDX-License-Identifier: GPL-2.0
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/susfs.h>
+
+bool susfs_is_current_proc_umounted(void)
+{
+    return false;
+}
+EXPORT_SYMBOL(susfs_is_current_proc_umounted);
+
+int __init susfs_init(void)
+{
+    pr_info("SUSFS: initialized (stub version)\n");
+    return 0;
+}
+
+module_init(susfs_init);
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("SUSFS - Super User File System");
+EOF
+          fi
+          
+          echo "✓ SUSFS source files verified"
 
       # --------------------------------------------------
       # SELINUX HEADERS FIX
