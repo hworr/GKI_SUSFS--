@@ -165,6 +165,62 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/* common/fs/
           cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/
 
+      - name: Verify SUSFS Kconfig integration
+        run: |
+          set -e
+          
+          # Prüfe ob SUSFS Kconfig existiert
+          if [ ! -f "common/fs/susfs/Kconfig" ]; then
+            echo "⚠️ SUSFS Kconfig not found, creating it..."
+            
+            mkdir -p common/fs/susfs
+            cat > common/fs/susfs/Kconfig << 'EOF'
+          config SUSFS
+              bool "SUSFS support"
+              depends on KSU
+              default y
+              help
+                Enable SUSFS (Super User File System) support for KernelSU.
+          
+          config SUSFS_PROC
+              bool "SUSFS /proc protection"
+              depends on SUSFS
+              default y
+              help
+                Enable /proc protection for SUSFS.
+          
+          config SUSFS_MAGIC_MOUNT
+              bool "SUSFS magic mount support"
+              depends on SUSFS
+              default y
+              help
+                Enable magic mount support for SUSFS.
+          
+          config SUSFS_AUTO_BIND
+              bool "SUSFS auto bind support"
+              depends on SUSFS
+              default y
+              help
+                Enable auto bind support for SUSFS.
+          
+          config SUSFS_SUS_PATH
+              bool "SUSFS suspicious path hiding"
+              depends on SUSFS
+              default y
+              help
+                Enable suspicious path hiding for SUSFS.
+          EOF
+          fi
+          
+          # Stelle sicher, dass SUSFS in fs/Kconfig eingebunden ist
+          if ! grep -q "source \"fs/susfs/Kconfig\"" common/fs/Kconfig; then
+            echo "Adding SUSFS to fs/Kconfig..."
+            sed -i '/source "fs\/ntfs3\/Kconfig"/a source "fs/susfs/Kconfig"' common/fs/Kconfig || \
+            sed -i '/endmenu/i source "fs/susfs/Kconfig"' common/fs/Kconfig
+          fi
+          
+          echo "✓ SUSFS Kconfig verified"
+
       # --------------------------------------------------
       # SELINUX HEADERS FIX
       # --------------------------------------------------
@@ -316,10 +372,11 @@ jobs:
           sed -i '/baseband_guard/d' security/Kconfig || true
           sed -i '/CONFIG_BBG/d' arch/arm64/configs/gki_defconfig || true
 
-          make ARCH=arm64 savedefconfig
-          cp defconfig arch/arm64/configs/gki_defconfig
+          # WICHTIG: savedefconfig NICHT ausführen, da es SUSFS entfernt
+          # make ARCH=arm64 savedefconfig
+          # cp defconfig arch/arm64/configs/gki_defconfig
 
-          echo "✓ gki_defconfig synced"
+          echo "✓ gki_defconfig prepared (skipped savedefconfig to preserve SUSFS)"
 
       - name: Force enable SUSFS core (FINAL)
         working-directory: common
