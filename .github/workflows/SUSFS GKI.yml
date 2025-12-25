@@ -684,22 +684,39 @@ jobs:
           command: |
             set -e
             set -x
-            cd "$CONFIG"
+      
+            echo "KERNEL_ROOT=$KERNEL_ROOT"
+      
+            if [ ! -d "$KERNEL_ROOT" ]; then
+              echo "❌ KERNEL_ROOT does not exist"
+              ls -lah
+              exit 1
+            fi
+      
+            cd "$KERNEL_ROOT"
+      
             echo "Building the kernel..."
+      
             # replace BUILD_SYSTEM_DLKM=1 with BUILD_SYSTEM_DLKM=0
             sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64
-            # del line MODULES_ORDER=android/gki_aarch64_modules 
+      
+            # delete MODULES_ORDER
             sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64
+      
+            # disable strict KMI
             sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64
-
+      
             if [ -f "build/build.sh" ]; then
-              # LTO=thin SYSTEM_DLKM_RE_SIGN=0 BUILD_SYSTEM_DLKM=0 KMI_SYMBOL_LIST_STRICT_MODE=0 BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh CC="/usr/bin/ccache clang" || exit 1
-              LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh CC="/usr/bin/ccache clang" || exit 1
+              LTO=thin \
+              BUILD_CONFIG=common/build.config.gki.aarch64 \
+              build/build.sh CC="/usr/bin/ccache clang"
             else
-              # tools/bazel build --disk_cache=/home/runner/.cache/bazel --config=fast --lto=full --copt=-Wno-error --copt=-mllvm --copt=-polly --copt=-mllvm --copt=-polly-vectorizer=stripmine --linkopt="-fuse-ld=lld" //common:kernel_aarch64_dist|| exit 1
-              # tools/bazel build --disk_cache=/home/runner/.cache/bazel --config=fast --lto=thin //common:kernel_aarch64_dist || exit 1
-              tools/bazel build --disk_cache=/home/runner/.cache/bazel --config=fast //common:kernel_aarch64_dist || exit 1
+              tools/bazel build \
+                --disk_cache=/home/runner/.cache/bazel \
+                --config=fast \
+                //common:kernel_aarch64_dist
             fi
+      
             ccache --show-stats
 
       - name: Patch Image File A12 & A13
