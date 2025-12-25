@@ -1,0 +1,12 @@
+diff --git a/security/Kconfig b/security/Kconfig
+--- a/security/Kconfig
++++ b/security/Kconfig
+@@
+-source "security/baseband-guard/Kconfig"
+-
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@
+-CONFIG_BBG=y
+
