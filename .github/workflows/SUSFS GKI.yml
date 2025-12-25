@@ -633,14 +633,21 @@ jobs:
           echo "Applying GKI-safe config fragment..."
       
           DEFCONFIG="common/arch/arm64/configs/gki_defconfig"
+          FRAGMENT="./kernel/configs/sukisu_susfs.fragment"
       
           if [ ! -f "$DEFCONFIG" ]; then
             echo "❌ gki_defconfig not found"
             exit 1
           fi
       
-          - cat kernel/configs/sukisu_susfs.fragment >> "$DEFCONFIG"
-          + cat ./kernel/configs/sukisu_susfs.fragment >> "$DEFCONFIG"
+          if [ ! -f "$FRAGMENT" ]; then
+            echo "❌ Fragment not found: $FRAGMENT"
+            echo "Available files:"
+            find kernel -type f || true
+            exit 1
+          fi
+      
+          cat "$FRAGMENT" >> "$DEFCONFIG"
       
           echo "✓ Fragment applied"
           echo "Last lines:"
