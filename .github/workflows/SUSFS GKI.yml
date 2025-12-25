@@ -73,7 +73,7 @@ jobs:
         id: kernel-cache
         uses: actions/cache@v4
         with:
-          path: ${{ env.KERNEL_ROOT }}
+          working-directory: ${{ env.KERNEL_ROOT }}
           key: kernel-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
       
       # Nur wenn Cache NICHT da ist → repo init + sync
