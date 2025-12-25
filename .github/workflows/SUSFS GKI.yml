@@ -449,16 +449,14 @@ jobs:
             exit 1
           fi
 
-      - name: Apply New Hooks Patches
+      - name: Apply SukiSU hooks (optional)
+        if: ${{ inputs.kernelsu_variant == 'SukiSU' }}
+        working-directory: common
         run: |
-          echo "Changing to configuration directory: $CONFIG..."
-          cd "$CONFIG/common"
-
-          if [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
-            echo "Applying hooks for SukiSU..."
-            cp ../../SukiSU_patch/hooks/scope_min_manual_hooks_v1.6.patch ./
-            patch -p1 -F 3 < scope_min_manual_hooks_v1.6.patch
-          fi
+          set -e
+          echo "Applying hooks for SukiSU..."
+          cp ../SukiSU_patch/hooks/scope_min_manual_hooks_v1.6.patch .
+          patch -p1 -F 3 < scope_min_manual_hooks_v1.6.patch || true
 
       # - name: Apply Hide Stuff Patches
       #   run: |
