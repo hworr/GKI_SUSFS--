@@ -120,6 +120,14 @@ jobs:
       run: |
         curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
 
+    - name: Fix KernelSU SELinux includes (GKI correct)
+      run: |
+        cd common
+        for f in drivers/kernelsu/*.c; do
+          sed -i '/security\/selinux\/include\/security.h/d' "$f"
+          sed -i '/security\/selinux\/include\/objsec.h/d' "$f"
+        done
+        echo "✓ Removed SELinux internal includes from KernelSU (GKI-safe)"
     # --------------------------------------------------
     # SUSFS (PATCH ONLY – NO DEFCONFIG)
     # --------------------------------------------------
@@ -179,22 +187,6 @@ jobs:
     
         "$MERGE" -m "$DEFCONFIG" /tmp/gki_nethunter.config
         cp .config "$DEFCONFIG"
-
-    - name: Fix KernelSU SELinux include (GKI 6.6)
-      run: |
-        cd common
-    
-        for f in drivers/kernelsu/*.c; do
-          sed -i \
-            's|#include <security/selinux/include/security.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n#include <security/selinux/include/security.h>\n#endif|' \
-            "$f" || true
-    
-          sed -i \
-            's|#include <security/selinux/include/objsec.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n#include <security/selinux/include/objsec.h>\n#endif|' \
-            "$f" || true
-        done
-    
-        echo "✓ KernelSU SELinux headers guarded"
 
     - name: Sync gki_defconfig
       run: |
