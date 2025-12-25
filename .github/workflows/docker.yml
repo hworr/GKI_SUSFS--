@@ -202,6 +202,57 @@ jobs:
         sed -i 's/check_defconfig//' common/build.config.gki
         sed -i 's/-maybe-dirty//g; s/-dirty//g' common/scripts/setlocalversion
 
+    - name: Merge kernel config (GKI safe)
+      run: |
+        DEFCONFIG=common/arch/arm64/configs/gki_defconfig
+        MERGE=common/scripts/kconfig/merge_config.sh
+        chmod +x "$MERGE"
+        cat > /tmp/gki_nethunter.config << 'EOF'
+        # KernelSU
+        CONFIG_KSU=y
+        CONFIG_KSU_MANUAL_HOOK=y
+        CONFIG_KSU_KPROBES_HOOK=n
+        # SUSFS
+        CONFIG_SUSFS=y
+        CONFIG_KSU_SUSFS=y
+        CONFIG_SUSFS_PROC=y
+        CONFIG_SUSFS_MAGIC_MOUNT=y
+        CONFIG_SUSFS_AUTO_BIND=y
+        CONFIG_SUSFS_SUS_PATH=y
+        # NetHunter (GKI SAFE)
+        CONFIG_CFG80211=m
+        CONFIG_MAC80211=m
+        CONFIG_USB_GADGET=y
+        CONFIG_USB_CONFIGFS=y
+        CONFIG_USB_NET_DRIVERS=y
+        CONFIG_USB_RNDIS_HOST=m
+        CONFIG_USB_NET_CDC_ECM=m
+        CONFIG_USB_NET_CDC_NCM=m
+        CONFIG_USB_HID=m
+        CONFIG_USB_HIDDEV=y
+        # Filesystem
+        CONFIG_TMPFS_XATTR=y
+        CONFIG_TMPFS_POSIX_ACL=y
+        # Network
+        CONFIG_TCP_CONG_BBR=y
+        CONFIG_NET_SCH_FQ=y
+        CONFIG_DEFAULT_BBR=y
+        EOF
+        "$MERGE" -m "$DEFCONFIG" /tmp/gki_nethunter.config
+        cp .config "$DEFCONFIG"
+        echo "Merged config summary:"
+        grep -E 'CONFIG_(KSU|SUSFS|CFG80211|MAC80211|USB_GADGET|BBR)' "$DEFCONFIG"
+    - name: Sync gki_defconfig (savedefconfig)
+      run: |
+        cd common
+        sed -i '...' security/Kconfig
+        make ARCH=arm64 savedefconfig
+        cp defconfig arch/arm64/configs/gki_defconfig
+
+        rm -rf common/security/baseband-guard || true
+        sed -i '/baseband_guard/d' common/security/Kconfig
+        sed -i '/CONFIG_BBG/d' common/arch/arm64/configs/gki_defconfig
+
     # --------------------------------------------------
     # BUILD
     # --------------------------------------------------
