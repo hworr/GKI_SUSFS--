@@ -45,7 +45,9 @@ jobs:
       uses: easimon/maximize-build-space@master
 
     - name: Install dependencies
-      run: sudo apt update && sudo apt install -y git curl python3 ccache
+      run: |
+        sudo apt update
+        sudo apt install -y git curl python3 ccache
 
     # --------------------------------------------------
     # CCACHE
@@ -105,7 +107,7 @@ jobs:
         fi
 
     # --------------------------------------------------
-    # BASEBAND GUARD (NO defconfig pollution!)
+    # BASEBAND GUARD (PATCH ONLY)
     # --------------------------------------------------
     - name: Apply Baseband Guard
       run: |
@@ -122,11 +124,12 @@ jobs:
         curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
 
     # --------------------------------------------------
-    # SUSFS (PATCH ONLY)
+    # SUSFS (PATCH ONLY – NO DEFCONFIG)
     # --------------------------------------------------
     - name: Apply SUSFS core patch
       working-directory: common
       run: |
+        set -e
         PATCH="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
         patch -p1 < "$PATCH" || true
         rm -f fs/proc/*.rej || true
@@ -137,27 +140,22 @@ jobs:
         cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/
 
     # --------------------------------------------------
-    # GKI DEFCONFIG SANITIZER (CRITICAL)
+    # GKI DEFCONFIG SANITIZER (ABSOLUT KRITISCH)
     # --------------------------------------------------
     - name: Sanitize gki_defconfig (GKI safe)
       run: |
         set -e
         DEFCONFIG=common/arch/arm64/configs/gki_defconfig
-    
-        # ❌ Entfernen (GKI-verboten)
+
+        # ❌ GKI-verbotene Optionen entfernen
         sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
         sed -i '/^CONFIG_KSU_SUSFS/d' "$DEFCONFIG"
         sed -i '/^CONFIG_KSU_SUSFS_ENABLE_LOG/d' "$DEFCONFIG"
         sed -i '/^CONFIG_KSU_SUSFS_SPOOF_UNAME/d' "$DEFCONFIG"
         sed -i '/^CONFIG_BBG/d' "$DEFCONFIG"
-    
-        # ✅ KernelSU minimal (GKI-safe)
+
+        # ❌ auch KernelSU nicht fest verdrahten
         sed -i '/^CONFIG_KSU/d' "$DEFCONFIG"
-    
-        printf '%s\n' \
-          'CONFIG_KSU=y' \
-          'CONFIG_KSU_MANUAL_HOOK=y' \
-          'CONFIG_KSU_KPROBES_HOOK=n' >> "$DEFCONFIG"
 
     # --------------------------------------------------
     # BUILD
