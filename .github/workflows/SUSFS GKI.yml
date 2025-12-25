@@ -328,126 +328,92 @@ jobs:
 
       - name: Add SukiSU
         if: ${{ inputs.kernelsu_variant == 'SukiSU' }}
-        working-directory: ${{ env.KERNEL_ROOT }}
         run: |
           set -e
-      
-          echo "Adding SukiSU..."
-          curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash $BRANCH
-      
-          cd KernelSU
-      
-          # Revert problematic commits safely
-          git revert -m 1 $(git log --grep="KSU_SUKISU" --pretty=format:"%h" -n 1) -n || true
+          echo "==> Adding SukiSU"
+          curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash "$BRANCH"
+          
+              cd KernelSU
+          
+              # Revert known bad SukiSU commit if present
+              git revert -m 1 $(git log --grep="KSU_SUKISU" --pretty=format:"%h" -n 1) -n || true
 
-      # --------------------------------------------------
-      # SUSFS CORE (REQUIRED)
-      # --------------------------------------------------
+
       - name: Apply SUSFS core patch (REQUIRED)
-        working-directory: ${{ env.KERNEL_ROOT }}/common
+        working-directory: common
         run: |
           set -e
+      
           PATCH="$SUSFS4KSU/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
+      
           if [ ! -f "$PATCH" ]; then
-            echo "SUSFS core patch missing: $PATCH"
+            echo "❌ SUSFS core patch missing: $PATCH"
             exit 1
           fi
+      
           echo "==> Applying SUSFS core patch"
           patch -p1 < "$PATCH" || true
           rm -f fs/proc/*.rej
 
-      #---------------------------------------------------
-      # SUSFS Debug
-      #---------------------------------------------------
-      
-      #- name: Apply SUSFS debug init (EXPERIMENTAL)
-      #  working-directory: ${{ env.KERNEL_ROOT }}/common
-      #  run: |
-      #   set -e
-      #   echo "==> Applying SUSFS debug init patch"
-      #   patch -p1 < "$GITHUB_WORKSPACE/susfs_debug_init.patch"
 
-      # --------------------------------------------------
-      # SUSFS FIX PATCHES (OPTIONAL / SAFE)
-      # --------------------------------------------------
-
-      - name: Apply SUSFS Patches for KernelSU Variants
-        run: |
-           echo "Changing to configuration directory: $CONFIG..."
-           cd "$CONFIG"
-
-           echo "Applying SUSFS patches..."
-
-           # Copy SUSFS patches
-           cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./common/
-           cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
-           cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
-
-           if [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
-             echo "Applying SUSFS patches for SukiSU..."
-              cd KernelSU
-            
-            
-             echo "Applying SukiSU specific SUSFS patch..."
-           else
-             echo "Invalid KernelSU variant selected!"
-             exit 1
-           fi
-
-           # Change to common directory and apply common SUSFS patch
-           cd ../common
-           patch --fuzz=3 -p1 < 50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || true
-
-      
-      - name: Apply SUSFS fix patches (REQUIRED)
-        working-directory: ${{ env.KERNEL_ROOT }}/common
+      - name: Apply SUSFS patches
         run: |
           set -e
+      
+          echo "==> Copying SUSFS files"
+          cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch common/
+          cp susfs4ksu/kernel_patches/fs/* common/fs/
+          cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/
+      
+          echo "==> Applying SUSFS main patch"
+          cd common
+          patch --fuzz=3 -p1 < 50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || true
+
+      - name: Apply SUSFS fix patches (REQUIRED)
+        working-directory: common
+        run: |
+          set -e
+      
           FIX="$KERNEL_PATCHES/wild/susfs_fix_patches/v2.0.0"
+      
           apply_optional() {
             local p="$1"
             [ -f "$p" ] || return 0
             for lvl in 0 1 2; do
               if patch -p"$lvl" --dry-run < "$p" >/dev/null 2>&1; then
                 patch -p"$lvl" < "$p"
-                echo "applied $(basename "$p") with -p$lvl"
+                echo "✔ applied $(basename "$p") with -p$lvl"
                 return
               fi
             done
-            echo "skipped $(basename "$p")"
+            echo "↷ skipped $(basename "$p")"
           }
+      
           apply_optional "$FIX/fix_task_mmu.c.patch"
           apply_optional "$FIX/1_fix_base.c.patch"
+      
           rm -f fs/proc/*.rej
 
       - name: Force enable SUSFS core (FINAL)
-        working-directory: ${{ env.KERNEL_ROOT }}
         run: |
           set -e
-
+      
           DEFCONFIG="common/arch/arm64/configs/gki_defconfig"
-
-          echo "==> Forcing SUSFS core into gki_defconfig"
-
-          # Remove old entries if present
+      
+          echo "==> Cleaning old SUSFS entries"
           sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
-
-          # Add SUSFS core
+      
+          echo "==> Writing SUSFS config"
           cat >> "$DEFCONFIG" << 'EOF'
-          CONFIG_SUSFS=y
-          CONFIG_SUSFS_PROC=y
-          CONFIG_SUSFS_MAGIC_MOUNT=y
-          CONFIG_SUSFS_AUTO_BIND=y
-          CONFIG_SUSFS_SUS_PATH=y
-          EOF
+      CONFIG_SUSFS=y
+      CONFIG_SUSFS_PROC=y
+      CONFIG_SUSFS_MAGIC_MOUNT=y
+      CONFIG_SUSFS_AUTO_BIND=y
+      CONFIG_SUSFS_SUS_PATH=y
+      EOF
 
-          echo "==> Verifying SUSFS in gki_defconfig"
-          grep -q '^CONFIG_SUSFS=y' "$DEFCONFIG" || {
-            echo "❌ CONFIG_SUSFS missing in gki_defconfig – aborting build"
-            exit 1
-          }
-
-          grep '^CONFIG_SUSFS' "$DEFCONFIG"
+    echo "==> Verifying SUSFS"
+    grep '^CONFIG_SUSFS=y' "$DEFCONFIG"
 
 
       - name: Apply Module Check Bypass
