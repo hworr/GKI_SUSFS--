@@ -205,6 +205,35 @@ jobs:
         "$MERGE" -m "$DEFCONFIG" /tmp/gki_nethunter.config
         cp .config "$DEFCONFIG"
 
+    - name: KernelSU SELinux guard (GKI fix)
+      run: |
+        cd common
+    
+        for f in drivers/kernelsu/*.c; do
+          sed -i \
+            's|#include <security/selinux/include/security.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n#include <security/selinux/include/security.h>\n#endif|' \
+            "$f" || true
+    
+          sed -i \
+            's|#include <security/selinux/include/objsec.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n#include <security/selinux/include/objsec.h>\n#endif|' \
+            "$f" || true
+        done
+    
+        echo "✓ KernelSU SELinux guarded"
+
+    - name: Sync gki_defconfig
+      run: |
+        cd common
+    
+        rm -rf security/baseband-guard || true
+        sed -i '/baseband_guard/d' security/Kconfig || true
+        sed -i '/CONFIG_BBG/d' arch/arm64/configs/gki_defconfig || true
+    
+        make ARCH=arm64 savedefconfig
+        cp defconfig arch/arm64/configs/gki_defconfig
+    
+        echo "✓ gki_defconfig synced"
+
     # --------------------------------------------------
     # BUILD
     # --------------------------------------------------
