@@ -131,8 +131,8 @@ jobs:
         CONFIG_SUSFS_SUS_PATH=y
         
         # NetHunter (GKI SAFE)
-        CONFIG_CFG80211=y
-        CONFIG_MAC80211=y
+        CONFIG_CFG80211=m
+        CONFIG_MAC80211=m
         CONFIG_USB_RNDIS_HOST=y
         
         # Filesystem
@@ -150,6 +150,18 @@ jobs:
 
         echo "Final config:"
         grep -E 'CONFIG_(KSU|SUSFS|CFG80211|MAC80211|BBR)' "$DEFCONFIG"
+
+    - name: Sync gki_defconfig with savedefconfig (GKI fix)
+      run: |
+        set -e
+        cd common
+    
+        make ARCH=arm64 savedefconfig
+    
+        cp defconfig arch/arm64/configs/gki_defconfig
+    
+        echo "✓ gki_defconfig synced"
+        grep -E 'CONFIG_(KSU|SUSFS|CFG80211|MAC80211|BBR)' arch/arm64/configs/gki_defconfig || true
 
     # --------------------------------------------------
     # BUILD
