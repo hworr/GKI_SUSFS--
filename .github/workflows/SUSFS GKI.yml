@@ -276,6 +276,33 @@ jobs:
 
           echo "✓ gki_defconfig synced"
 
+      - name: Force enable SUSFS core (FINAL)
+        working-directory: common
+        run: |
+          set -e
+          DEFCONFIG="arch/arm64/configs/gki_defconfig"
+          echo "==> Forcing SUSFS core into gki_defconfig"
+          
+          # Remove old entries if present
+          sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
+          
+          # Add SUSFS core
+          cat >> "$DEFCONFIG" << 'EOF'
+          CONFIG_SUSFS=y
+          CONFIG_SUSFS_PROC=y
+          CONFIG_SUSFS_MAGIC_MOUNT=y
+          CONFIG_SUSFS_AUTO_BIND=y
+          CONFIG_SUSFS_SUS_PATH=y
+          EOF
+          
+          echo "==> Verifying SUSFS in gki_defconfig"
+          grep -q '^CONFIG_SUSFS=y' "$DEFCONFIG" || {
+            echo "❌ CONFIG_SUSFS missing in gki_defconfig – aborting build"
+            exit 1
+          }
+          grep '^CONFIG_SUSFS' "$DEFCONFIG"
+          echo "✓ SUSFS core verified in gki_defconfig"
+
       # --------------------------------------------------
       # BUILD
       # --------------------------------------------------
@@ -360,3 +387,21 @@ jobs:
         with:
           name: kernel
           path: kernel.zip
+
+      # --------------------------------------------------
+      # CACHE SPEICHERN
+      # --------------------------------------------------
+      - name: Save kernel repo cache
+        if: steps.repo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .repo
+            common
+          key: repo-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
+
+      - name: Save ccache
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}-${{ github.run_id }}
