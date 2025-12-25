@@ -79,25 +79,50 @@ jobs:
             ccache-
       
       # Nur wenn Cache NICHT da ist → repo init + sync
-      - name: Initialize and Sync Kernel Source
-        if: steps.kernel-cache.outputs.cache-hit != 'true'
-        working-directory: ${{ env.KERNEL_ROOT }}
+      - name: Init & sync kernel repo
         run: |
           set -e
-          FORMATTED_BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
+
+          # Android 'repo' Tool holen und vorbereiten
+          REPO_BIN="$HOME/bin/repo"
+          mkdir -p "$HOME/bin"
+          curl -o "$REPO_BIN" https://storage.googleapis.com/git-repo-downloads/repo
+          chmod a+x "$REPO_BIN"
+
+          # Variable für bequemere Nutzung
+          REPO="$REPO_BIN"
+
+          FORMATTED_BRANCH="android15-6.6-2025-09"
 
           echo "==> repo init"
-          $REPO init -u https://android.googlesource.com/kernel/manifest \
+          "$REPO" init -u https://android.googlesource.com/kernel/manifest \
             -b common-${FORMATTED_BRANCH}
-      
+
           REMOTE_BRANCH=$(git ls-remote https://android.googlesource.com/kernel/common ${FORMATTED_BRANCH})
           DEFAULT_MANIFEST_PATH=.repo/manifests/default.xml
           if grep -q deprecated <<< "$REMOTE_BRANCH"; then
             sed -i "s/\"${FORMATTED_BRANCH}\"/\"deprecated\/${FORMATTED_BRANCH}\"/g" "$DEFAULT_MANIFEST_PATH"
           fi
-      
+
           echo "==> repo sync"
-          $REPO sync -j$(nproc --all) --fail-fast
+          "$REPO" sync -j"$(nproc --all)" --fail-fast
+
+          # Alle relevanten Dateien finden, in denen die Includes vorkommen
+          files=$(grep -rl "security/selinux/include/security.h" common 2>/dev/null || true)
+          files+=" "$(grep -rl "security/selinux/include/objsec.h" common 2>/dev/null || true)
+
+          for f in $files; do
+            echo "Patching SELinux includes in $f"
+            sed -i \
+              's|#include <security/selinux/include/security.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n#include <security/selinux/include/security.h>\n#endif|' \
+              "$f" || true
+
+            sed -i \
+              's|#include <security/selinux/include/objsec.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n#include <security/selinux/include/objsec.h>\n#endif|' \
+              "$f" || true
+          done
+
+          echo "✓ KernelSU SELinux headers guarded"
 
           # Alle relevanten Dateien finden, in denen die Includes vorkommen
           files=$(grep -rl "security/selinux/include/security.h" common 2>/dev/null || true)
