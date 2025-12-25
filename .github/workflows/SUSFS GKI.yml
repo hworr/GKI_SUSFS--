@@ -455,6 +455,20 @@ jobs:
           grep '^CONFIG_SUSFS' "$DEFCONFIG"
           echo "✓ SUSFS core verified in gki_defconfig"
 
+      - name: Clean kernel tree before build
+        working-directory: common
+        run: |
+          set -e
+          echo "Cleaning kernel tree..."
+          
+          # Entferne temporäre Dateien vom flask.h Setup
+          rm -f .config .config.old
+          
+          # Bereinige den Tree
+          make mrproper || true
+          
+          echo "✓ Kernel tree cleaned"
+
       # --------------------------------------------------
       # BUILD
       # --------------------------------------------------
