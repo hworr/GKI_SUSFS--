@@ -149,6 +149,26 @@ jobs:
         set -e
         sed -i 's/check_defconfig = True/check_defconfig = False/' common/BUILD.bazel || true
         sed -i 's/check_defconfig=True/check_defconfig=False/' common/BUILD.bazel || true
+
+
+    - name: Sanitize gki_defconfig (required for GKI)
+      run: |
+        set -e
+        DEFCONFIG=common/arch/arm64/configs/gki_defconfig
+    
+        echo "Sanitizing gki_defconfig..."
+    
+        # ❌ Never echo these – they come from patches/Kconfig
+        sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
+        sed -i '/^CONFIG_KSU_SUSFS/d' "$DEFCONFIG"
+        sed -i '/^CONFIG_BBG/d' "$DEFCONFIG"
+    
+        # Optional noisy debug flags
+        sed -i '/^CONFIG_KSU_SUSFS_ENABLE_LOG/d' "$DEFCONFIG"
+        sed -i '/^CONFIG_KSU_SUSFS_SPOOF_UNAME/d' "$DEFCONFIG"
+    
+        echo "Sanitized entries:"
+        grep -E 'SUSFS|BBG|KSU_SUSFS' "$DEFCONFIG" || true
     
     # --------------------------------------------------
     # BUILD
