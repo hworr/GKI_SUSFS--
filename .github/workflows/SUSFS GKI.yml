@@ -1,4 +1,4 @@
-name: GKI Kernel Build (SukiSU + SUSFS + NetHunter)
+name: SukiSU Kernel Build (GKI Fixed)
 
 permissions:
   contents: write
@@ -7,8 +7,23 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
+      android_version:
+        required: true
+        type: string
+      kernel_version:
+        required: true
+        type: string
       os_patch_level:
         required: true
+        type: string
+      kernelsu_variant:
+        required: true
+        type: string
+      kernelsu_branch:
+        required: true
+        type: string
+      kernelsu_branch_other:
+        required: false
         type: string
 
 jobs:
@@ -20,69 +35,97 @@ jobs:
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
+      CCACHE_CPP2: "yes"
 
     steps:
     # --------------------------------------------------
-    # SPACE + DEPENDENCIES
+    # SPACE + TOOLS
     # --------------------------------------------------
-    - uses: easimon/maximize-build-space@master
-      with:
-        root-reserve-mb: 8192
-        swap-size-mb: 8192
-        remove-dotnet: "true"
-        remove-android: "true"
-        remove-haskell: "true"
-        remove-codeql: "true"
+    - name: Maximize build space
+      uses: easimon/maximize-build-space@master
 
-    - name: Install build dependencies
+    - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install -y \
-          git curl ccache python3 \
-          build-essential bc flex bison \
-          libssl-dev libelf-dev
+        sudo apt install -y git curl python3 ccache
+
+    # --------------------------------------------------
+    # CCACHE
+    # --------------------------------------------------
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: /home/runner/.ccache
+        key: ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
+        restore-keys: |
+          ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-
+          ccache-${{ inputs.android_version }}-
+          ccache-
 
     - name: Setup ccache
       run: |
-        ccache --max-size=3G
+        ccache --max-size=10G
         ccache --set-config=compression=true
-
-    - uses: actions/cache@v4
-      with:
-        path: ~/.ccache
-        key: ccache-${{ github.sha }}
-        restore-keys: ccache-
+        ccache --zero-stats
 
     # --------------------------------------------------
-    # REPO SYNC (GKI)
+    # REPO + KERNEL
     # --------------------------------------------------
     - name: Install repo tool
       run: |
         mkdir -p git-repo
-        curl -s https://storage.googleapis.com/git-repo-downloads/repo > git-repo/repo
+        curl https://storage.googleapis.com/git-repo-downloads/repo > git-repo/repo
         chmod +x git-repo/repo
         echo "REPO=$GITHUB_WORKSPACE/git-repo/repo" >> $GITHUB_ENV
 
-    - name: Repo init & sync (android15-6.6)
+    - name: Repo init & sync (GKI)
       run: |
+        set -e
         BRANCH="android15-6.6-${{ inputs.os_patch_level }}"
         $REPO init -u https://android.googlesource.com/kernel/manifest -b common-$BRANCH
         $REPO sync -j$(nproc --all) --fail-fast
 
     # --------------------------------------------------
-    # CLONE EXTERNAL PATCHES
+    # DEPENDENCIES
     # --------------------------------------------------
-    - name: Clone external repositories
+    - name: Clone SUSFS + AnyKernel3
       run: |
-        git clone https://github.com/ShirkNeko/susfs4ksu.git
-        git clone https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
+        git clone https://github.com/ShirkNeko/susfs4ksu.git -b gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}
         git clone https://github.com/MiRinChan/AnyKernel3.git
 
+    # --------------------------------------------------
+    # KERNELSU BRANCH
+    # --------------------------------------------------
+    - name: Determine KernelSU branch
+      run: |
+        if [[ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]]; then
+          if [[ "${{ inputs.kernelsu_branch }}" == "Other" ]]; then
+            echo "BRANCH=${{ inputs.kernelsu_branch_other }}" >> $GITHUB_ENV
+          else
+            echo "BRANCH=builtin" >> $GITHUB_ENV
+          fi
+        fi
+
+    # --------------------------------------------------
+    # BASEBAND GUARD (PATCH ONLY)
+    # --------------------------------------------------
+    - name: Apply Baseband Guard
+      run: |
+        set -e
+        curl -LSs https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
+        sed -i '/^config LSM$/,/^help$/{/default/ s/lockdown/lockdown,baseband_guard/}' common/security/Kconfig
+
+    # --------------------------------------------------
+    # KERNELSU (SUKISU)
+    # --------------------------------------------------
     - name: Add SukiSU
       if: ${{ inputs.kernelsu_variant == 'SukiSU' }}
       run: |
         curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
 
+    # --------------------------------------------------
+    # SUSFS (PATCH ONLY – NO DEFCONFIG)
+    # --------------------------------------------------
     - name: Apply SUSFS core patch
       working-directory: common
       run: |
@@ -96,18 +139,34 @@ jobs:
         cp susfs4ksu/kernel_patches/fs/* common/fs/
         cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/
 
+    # --------------------------------------------------
+    # GKI DEFCONFIG SANITIZER (ABSOLUT KRITISCH)
+    # --------------------------------------------------
+    - name: Sanitize gki_defconfig (GKI safe)
+      run: |
+        set -e
+        DEFCONFIG=common/arch/arm64/configs/gki_defconfig
+
+        # ❌ GKI-verbotene Optionen entfernen
+        sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
+        sed -i '/^CONFIG_KSU_SUSFS/d' "$DEFCONFIG"
+        sed -i '/^CONFIG_KSU_SUSFS_ENABLE_LOG/d' "$DEFCONFIG"
+        sed -i '/^CONFIG_KSU_SUSFS_SPOOF_UNAME/d' "$DEFCONFIG"
+        sed -i '/^CONFIG_BBG/d' "$DEFCONFIG"
+
+        # ❌ auch KernelSU nicht fest verdrahten
+        sed -i '/^CONFIG_KSU/d' "$DEFCONFIG"
+
     - name: Merge kernel config (GKI safe)
       run: |
         DEFCONFIG=common/arch/arm64/configs/gki_defconfig
         MERGE=common/scripts/kconfig/merge_config.sh
         chmod +x "$MERGE"
-
         cat > /tmp/gki_nethunter.config << 'EOF'
         # KernelSU
         CONFIG_KSU=y
         CONFIG_KSU_MANUAL_HOOK=y
         CONFIG_KSU_KPROBES_HOOK=n
-
         # SUSFS
         CONFIG_SUSFS=y
         CONFIG_KSU_SUSFS=y
@@ -115,37 +174,29 @@ jobs:
         CONFIG_SUSFS_MAGIC_MOUNT=y
         CONFIG_SUSFS_AUTO_BIND=y
         CONFIG_SUSFS_SUS_PATH=y
-
         # NetHunter (GKI SAFE)
         CONFIG_CFG80211=m
         CONFIG_MAC80211=m
-
         CONFIG_USB_GADGET=y
         CONFIG_USB_CONFIGFS=y
         CONFIG_USB_NET_DRIVERS=y
         CONFIG_USB_RNDIS_HOST=m
         CONFIG_USB_NET_CDC_ECM=m
         CONFIG_USB_NET_CDC_NCM=m
-
         CONFIG_USB_HID=m
         CONFIG_USB_HIDDEV=y
-
         # Filesystem
         CONFIG_TMPFS_XATTR=y
         CONFIG_TMPFS_POSIX_ACL=y
-
         # Network
         CONFIG_TCP_CONG_BBR=y
         CONFIG_NET_SCH_FQ=y
         CONFIG_DEFAULT_BBR=y
         EOF
-
         "$MERGE" -m "$DEFCONFIG" /tmp/gki_nethunter.config
         cp .config "$DEFCONFIG"
-
         echo "Merged config summary:"
         grep -E 'CONFIG_(KSU|SUSFS|CFG80211|MAC80211|USB_GADGET|BBR)' "$DEFCONFIG"
-
     - name: Sync gki_defconfig (savedefconfig)
       run: |
         cd common
@@ -155,32 +206,44 @@ jobs:
     # --------------------------------------------------
     # BUILD
     # --------------------------------------------------
-    - name: Build kernel
-      run: |
-        sed -i \
-          -e 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' \
-          -e '/MODULES_ORDER=android\/gki_aarch64_modules/d' \
-          -e '/KMI_SYMBOL_LIST_STRICT_MODE/d' \
-          common/build.config.gki.aarch64
+    - name: Build with retry
+      uses: nick-fields/retry@v3
+      with:
+        timeout_minutes: 30
+        max_attempts: 3
+        retry_on: timeout
+        command: |
+          set -e
+          cd "$GITHUB_WORKSPACE"
 
-        if [ -x build/build.sh ]; then
-          LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 \
-            build/build.sh CC="/usr/bin/ccache clang"
-        else
-          tools/bazel build --config=fast //common:kernel_aarch64_dist
-        fi
+          sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
+          sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64 || true
+          sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
+
+          if [ -f "build/build.sh" ]; then
+            LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 \
+              build/build.sh CC="/usr/bin/ccache clang"
+          else
+            tools/bazel build --config=fast //common:kernel_aarch64_dist
+          fi
+
+    # --------------------------------------------------
+    # CCACHE STATS
+    # --------------------------------------------------
+    - name: Show ccache stats
+      run: ccache --show-stats
 
     # --------------------------------------------------
     # PACKAGE
     # --------------------------------------------------
     - name: Package AnyKernel3
       run: |
-        IMG=$(ls out/*/dist/Image 2>/dev/null || ls bazel-bin/common/kernel_aarch64/Image)
-        cp "$IMG" AnyKernel3/Image
+        cp bazel-bin/common/kernel_aarch64/Image AnyKernel3/Image
         cd AnyKernel3
         zip -r ../kernel.zip .
 
-    - uses: actions/upload-artifact@v4
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
       with:
         name: kernel
         path: kernel.zip
