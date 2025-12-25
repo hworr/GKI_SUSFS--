@@ -56,7 +56,6 @@ jobs:
         sudo apt update
         sudo apt install -y \
           git curl python3 repo ccache lz4 openssl
-
     # --------------------------------------------------
     # ENV
     # --------------------------------------------------
@@ -68,8 +67,6 @@ jobs:
         echo "KERNEL_ROOT=$KERNEL_ROOT" >> $GITHUB_ENV
         echo "DEFCONFIG=$KERNEL_ROOT/common/arch/arm64/configs/gki_defconfig" >> $GITHUB_ENV
         mkdir -p "$KERNEL_ROOT"
-
-
     # --------------------------------------------------
     # DEPENDENCIES
     # --------------------------------------------------
@@ -78,7 +75,6 @@ jobs:
           git clone https://github.com/WildKernels/kernel_patches.git
           git clone https://github.com/WildKernels/AnyKernel3.git
           git clone https://gitlab.com/WildKernels/susfs4ksu.git -b gki-${{ inputs.android_version }}-${{ inputs.kernel_version }} 
-
     # --------------------------------------------------
     # TOOLS
     # --------------------------------------------------
@@ -89,7 +85,6 @@ jobs:
         echo "PATH=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/bin:$PATH" >> $GITHUB_ENV
         echo "AVBTOOL=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/bin/avbtool" >> $GITHUB_ENV
         echo "MKBOOTIMG=$GITHUB_WORKSPACE/mkbootimg/mkbootimg.py" >> $GITHUB_ENV
-
     # --------------------------------------------------
     # KERNEL SOURCE
     # --------------------------------------------------
@@ -99,7 +94,6 @@ jobs:
         BRANCH="common-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
         repo init -u https://android.googlesource.com/kernel/manifest -b "$BRANCH" --depth=1
         repo sync -c -j$(nproc) --no-tags --fail-fast
-
     # --------------------------------------------------
     # KernelSU-Next (OFFICIAL)
     # --------------------------------------------------
@@ -107,7 +101,6 @@ jobs:
       run: |
         cd "$KERNEL_ROOT"
         curl -LSs https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh | bash -
-
     # --------------------------------------------------
     # SUSFS CORE (REQUIRED)
     #--------------------------------------------------
@@ -116,9 +109,7 @@ jobs:
       working-directory: ${{ env.KERNEL_ROOT }}/common
       run: |
         set -e
-
         PATCH="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
-
         echo "==> Applying SUSFS core patch (Pixel safe mode)"
         patch -p1 < "$PATCH" || true
     
@@ -149,7 +140,6 @@ jobs:
           apply_optional "$FIX/fix_task_mmu.c.patch"
           apply_optional "$FIX/1_fix_base.c.patch"
           rm -f fs/proc/*.rej
-
     # --------------------------------------------------
     # KERNEL CONFIG (CLEAN + SAFE + DOCKER + BBR)
     # --------------------------------------------------
@@ -157,14 +147,11 @@ jobs:
       run: |
         cd "$KERNEL_ROOT"
         CFG="common/arch/arm64/configs/gki_defconfig"
-
         add() { grep -q "^$1=" "$CFG" || echo "$1=$2" >> "$CFG"; }
-
         # KernelSU
         add CONFIG_KSU y
         add CONFIG_KSU_MANUAL_HOOK y
         add CONFIG_KSU_MANUAL_SU n
-
         # SUSFS (Pixel SAFE)
         if [[ "${{ inputs.require_susfs }}" == "true" ]]; then
           add CONFIG_KSU_SUSFS y
@@ -173,7 +160,6 @@ jobs:
           add CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT y
           add CONFIG_KSU_SUSFS_SUS_PATH y
           add CONFIG_KSU_SUSFS_SPOOF_UNAME y
-
           # ❌ UMOUNT = OFF (WLAN / MODEM SAFE)
           add CONFIG_KSU_SUSFS_TRY_UMOUNT n
           add CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT n
@@ -181,7 +167,6 @@ jobs:
           add CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT n
           add CONFIG_KSU_SUSFS_ENABLE_LOG n
         fi
-
         # Namespaces (Docker)
         add CONFIG_PID_NS y
         add CONFIG_IPC_NS y
@@ -193,56 +178,12 @@ jobs:
         add CONFIG_MEMCG y
         add CONFIG_BLK_CGROUP y
         add CONFIG_OVERLAY_FS y
-
         # BBR
         add CONFIG_TCP_CONG_ADVANCED y
         add CONFIG_TCP_CONG_BBR y
         add CONFIG_NET_SCH_FQ y
-
         sed -i 's/check_defconfig//' common/build.config.gki
         sed -i 's/-maybe-dirty//g; s/-dirty//g' common/scripts/setlocalversion
-
-    - name: Merge kernel config (GKI safe)
-      run: |
-        DEFCONFIG=common/arch/arm64/configs/gki_defconfig
-        MERGE=common/scripts/kconfig/merge_config.sh
-        chmod +x "$MERGE"
-        cat > /tmp/gki_nethunter.config << 'EOF'
-        # KernelSU
-        CONFIG_KSU=y
-        CONFIG_KSU_MANUAL_HOOK=y
-        CONFIG_KSU_KPROBES_HOOK=n
-        # SUSFS
-        CONFIG_SUSFS=y
-        CONFIG_KSU_SUSFS=y
-        CONFIG_SUSFS_PROC=y
-        CONFIG_SUSFS_MAGIC_MOUNT=y
-        CONFIG_SUSFS_AUTO_BIND=y
-        CONFIG_SUSFS_SUS_PATH=y
-        # NetHunter (GKI SAFE)
-        CONFIG_CFG80211=m
-        CONFIG_MAC80211=m
-        CONFIG_USB_GADGET=y
-        CONFIG_USB_CONFIGFS=y
-        CONFIG_USB_NET_DRIVERS=y
-        CONFIG_USB_RNDIS_HOST=m
-        CONFIG_USB_NET_CDC_ECM=m
-        CONFIG_USB_NET_CDC_NCM=m
-        CONFIG_USB_HID=m
-        CONFIG_USB_HIDDEV=y
-        # Filesystem
-        CONFIG_TMPFS_XATTR=y
-        CONFIG_TMPFS_POSIX_ACL=y
-        # Network
-        CONFIG_TCP_CONG_BBR=y
-        CONFIG_NET_SCH_FQ=y
-        CONFIG_DEFAULT_BBR=y
-        EOF
-        "$MERGE" -m "$DEFCONFIG" /tmp/gki_nethunter.config
-        cp .config "$DEFCONFIG"
-        echo "Merged config summary:"
-        grep -E 'CONFIG_(KSU|SUSFS|CFG80211|MAC80211|USB_GADGET|BBR)' "$DEFCONFIG"
-         
     # --------------------------------------------------
     # BUILD
     # --------------------------------------------------
@@ -253,7 +194,6 @@ jobs:
         sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64
         sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64
         tools/bazel build --config=fast //common:kernel_aarch64_dist
-
     # --------------------------------------------------
     # BOOT IMAGES
     # --------------------------------------------------
@@ -262,18 +202,15 @@ jobs:
         mkdir -p kernel-build-tools/linux-x86/share/avb
         openssl genrsa -out kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem 2048
         echo "BOOT_SIGN_KEY_PATH=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem" >> $GITHUB_ENV
-
     - name: Build boot images
       run: |
         cd "$KERNEL_ROOT/bazel-bin/common/kernel_aarch64"
         gzip -n -k -f Image
         lz4 -f Image Image.lz4
-
         for s in "" ".gz" ".lz4"; do
           k="Image$s"
           o="boot${s//./-}.img"
           [ -z "$s" ] && o="boot.img"
-
           $MKBOOTIMG --header_version 4 --kernel "$k" --output "$o"
           $AVBTOOL add_hash_footer \
             --partition_name boot \
@@ -281,10 +218,8 @@ jobs:
             --image "$o" \
             --algorithm SHA256_RSA2048 \
             --key "$BOOT_SIGN_KEY_PATH"
-
           cp "$o" "$GITHUB_WORKSPACE/${CONFIG}-$o"
         done
-
     - name: Upload boot images
       uses: actions/upload-artifact@v4
       with:
