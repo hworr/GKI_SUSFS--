@@ -539,69 +539,57 @@ jobs:
       #         echo "CONFIG_ZRAM_WRITEBACK=y" >> "$CONFIG_FILE"
       #       fi
       #     fi
-
-      - name: Add Configuration Settings
+      
+      - name: Add NetHunter configuration (safe)
         run: |
+          set -e
+      
           echo "Workspace:"
           pwd
           ls -lah
-          
-          # Fallback: Kernel Root automatisch finden
-          if [ -d "$KERNEL_ROOT/common" ]; then
-            echo "Using KERNEL_ROOT=$KERNEL_ROOT"
+      
+          # Robust GKI kernel root detection
+          if [ -d "common/arch/arm64/configs" ]; then
+            echo "Using workspace as KERNEL_ROOT"
+          elif [ -d "$KERNEL_ROOT/common/arch/arm64/configs" ]; then
+            echo "Using env KERNEL_ROOT=$KERNEL_ROOT"
             cd "$KERNEL_ROOT"
-          elif [ -d "android15-6.6-98/common" ]; then
-            echo "Using local android15-6.6-98"
-            cd android15-6.6-98
           else
-            echo "❌ Kernel root not found"
+            echo "❌ GKI kernel root not found"
             find . -maxdepth 2 -type d
             exit 1
           fi
-    
-          DEFCONFIG=./common/arch/arm64/configs/gki_defconfig
       
-          echo "Adding configuration settings to gki_defconfig..."
+          DEFCONFIG=common/arch/arm64/configs/gki_defconfig
       
+          echo "Adding minimal NetHunter-safe config…"
+      
+          # KEEP THESE (safe)
           echo "CONFIG_KSU=y" >> "$DEFCONFIG"
           echo "CONFIG_KSU_MANUAL_HOOK=y" >> "$DEFCONFIG"
           echo "CONFIG_KSU_MANUAL_SU=n" >> "$DEFCONFIG"
-
+      
           echo "CONFIG_TMPFS_XATTR=y" >> "$DEFCONFIG"
           echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$DEFCONFIG"
       
-          echo "CONFIG_IP_NF_TARGET_TTL=y" >> "$DEFCONFIG"
-          echo "CONFIG_IP6_NF_TARGET_HL=y" >> "$DEFCONFIG"
-          echo "CONFIG_IP6_NF_MATCH_HL=y" >> "$DEFCONFIG"
-      
-          echo "CONFIG_TCP_CONG_ADVANCED=y" >> "$DEFCONFIG"
           echo "CONFIG_TCP_CONG_BBR=y" >> "$DEFCONFIG"
           echo "CONFIG_NET_SCH_FQ=y" >> "$DEFCONFIG"
           echo "CONFIG_DEFAULT_BBR=y" >> "$DEFCONFIG"
       
-          echo "CONFIG_NETFILTER=y" >> "$DEFCONFIG"
-          echo "CONFIG_NETFILTER_ADVANCED=y" >> "$DEFCONFIG"
-          echo "CONFIG_NETFILTER_XTABLES=y" >> "$DEFCONFIG"
-          echo "CONFIG_NETFILTER_XT_MATCH_CONNTRACK=y" >> "$DEFCONFIG"
-          echo "CONFIG_NETFILTER_XT_MATCH_MULTIPORT=y" >> "$DEFCONFIG"
-      
-          echo "CONFIG_CFG80211=y" >> "$DEFCONFIG"
-          echo "CONFIG_MAC80211=y" >> "$DEFCONFIG"
-      
           echo "✓ Configuration step finished"
-
-
-           sed -i '/name = "kernel_aarch64",/,/)/{
-              /module_outs = \[/!{
+      
+          # === NetHunter modules only (GKI-safe) ===
+          sed -i '/name = "kernel_aarch64",/,/)/{
+            /module_outs = \[/!{
               /)/i\
-                  module_outs = [\
-                      "net/wireless/cfg80211.ko",\
-                      "net/mac80211/mac80211.ko",\
-                      "drivers/net/usb/rndis_host.ko",\
-                  ],\
-              }
-              }' common/BUILD.bazel
-
+                module_outs = [\
+                  "net/wireless/cfg80211.ko",\
+                  "net/mac80211/mac80211.ko",\
+                  "drivers/net/usb/rndis_host.ko",\
+                ],\
+            }
+          }' common/BUILD.bazel
+    
       - name: Final KernelSU + SUSFS config
         working-directory: ${{ env.KERNEL_ROOT }}
         run: |
