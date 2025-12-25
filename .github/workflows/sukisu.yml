@@ -31,9 +31,11 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
+      CCACHE_DIR: /home/runner/.ccache
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
+      CCACHE_CPP2: "yes"
 
     steps:
     # --------------------------------------------------
@@ -45,10 +47,24 @@ jobs:
     - name: Install dependencies
       run: sudo apt update && sudo apt install -y git curl python3 ccache
 
+    # --------------------------------------------------
+    # CCACHE (RESTORE)
+    # --------------------------------------------------
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: /home/runner/.ccache
+        key: ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
+        restore-keys: |
+          ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-
+          ccache-${{ inputs.android_version }}-
+          ccache-
+
     - name: Setup ccache
       run: |
-        ccache --max-size=2G
-        echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+        ccache --max-size=10G
+        ccache --set-config=compression=true
+        ccache --zero-stats
 
     # --------------------------------------------------
     # REPO + KERNEL
@@ -116,13 +132,8 @@ jobs:
       working-directory: common
       run: |
         set -e
-    
         PATCH="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
-
-        echo "==> Applying SUSFS core patch"
         patch -p1 < "$PATCH" || true
-
-        # Clean up possible rejects
         rm -f fs/proc/*.rej || true
 
     - name: Copy SUSFS files
@@ -135,41 +146,20 @@ jobs:
         DEFCONFIG=common/arch/arm64/configs/gki_defconfig
         sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
         cat >> "$DEFCONFIG" << 'EOF'
-        CONFIG_SUSFS=y
-        CONFIG_KSU_SUSFS=y
-        CONFIG_KSU_SUSFS_ENABLE_LOG=y
-        CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-        EOF
+CONFIG_SUSFS=y
+CONFIG_KSU_SUSFS=y
+CONFIG_KSU_SUSFS_ENABLE_LOG=y
+CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+EOF
 
     # --------------------------------------------------
-    #  Disable GKI defconfig check
+    # Disable GKI defconfig check
     # --------------------------------------------------
     - name: Disable GKI defconfig check
       run: |
-        set -e
         sed -i 's/check_defconfig = True/check_defconfig = False/' common/BUILD.bazel || true
         sed -i 's/check_defconfig=True/check_defconfig=False/' common/BUILD.bazel || true
 
-
-    - name: Sanitize gki_defconfig (required for GKI)
-      run: |
-        set -e
-        DEFCONFIG=common/arch/arm64/configs/gki_defconfig
-    
-        echo "Sanitizing gki_defconfig..."
-    
-        # ❌ Never echo these – they come from patches/Kconfig
-        sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
-        sed -i '/^CONFIG_KSU_SUSFS/d' "$DEFCONFIG"
-        sed -i '/^CONFIG_BBG/d' "$DEFCONFIG"
-    
-        # Optional noisy debug flags
-        sed -i '/^CONFIG_KSU_SUSFS_ENABLE_LOG/d' "$DEFCONFIG"
-        sed -i '/^CONFIG_KSU_SUSFS_SPOOF_UNAME/d' "$DEFCONFIG"
-    
-        echo "Sanitized entries:"
-        grep -E 'SUSFS|BBG|KSU_SUSFS' "$DEFCONFIG" || true
-    
     # --------------------------------------------------
     # BUILD
     # --------------------------------------------------
@@ -182,18 +172,12 @@ jobs:
         command: |
           set -e
           set -x
-    
-          # WICHTIG: im Workspace bleiben
           cd "$GITHUB_WORKSPACE"
-    
-          echo "Building the kernel..."
-    
-          # GKI Build-Config anpassen
+
           sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
           sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64 || true
           sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
-    
-          # Build
+
           if [ -f "build/build.sh" ]; then
             LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 \
               build/build.sh CC="/usr/bin/ccache clang"
@@ -203,6 +187,12 @@ jobs:
               --config=fast \
               //common:kernel_aarch64_dist
           fi
+
+    # --------------------------------------------------
+    # CCACHE STATS
+    # --------------------------------------------------
+    - name: Show ccache stats
+      run: ccache --show-stats
 
     # --------------------------------------------------
     # PACKAGE
