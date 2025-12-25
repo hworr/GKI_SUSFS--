@@ -383,56 +383,56 @@ jobs:
           if [ ! -f "common/include/linux/susfs.h" ]; then
             echo "❌ Missing susfs.h - creating stub header"
             cat > common/include/linux/susfs.h << 'EOF'
-#ifndef _LINUX_SUSFS_H
-#define _LINUX_SUSFS_H
-
-#include <linux/types.h>
-
-#ifdef CONFIG_SUSFS
-
-/* SUSFS flags for address_space */
-#define BIT_SUS_MAPS 31
-
-/* SUSFS function declarations */
-extern bool susfs_is_current_proc_umounted(void);
-extern int susfs_init(void);
-
-#else
-
-static inline bool susfs_is_current_proc_umounted(void) { return false; }
-static inline int susfs_init(void) { return 0; }
-
-#endif /* CONFIG_SUSFS */
-
-#endif /* _LINUX_SUSFS_H */
-EOF
+            #ifndef _LINUX_SUSFS_H
+            #define _LINUX_SUSFS_H
+                    
+            #include <linux/types.h>
+                    
+            #ifdef CONFIG_SUSFS
+                    
+            /* SUSFS flags for address_space */
+            #define BIT_SUS_MAPS 31
+                    
+            /* SUSFS function declarations */
+            extern bool susfs_is_current_proc_umounted(void);
+            extern int susfs_init(void);
+                    
+            #else
+                    
+            static inline bool susfs_is_current_proc_umounted(void) { return false; }
+            static inline int susfs_init(void) { return 0; }
+                    
+            #endif /* CONFIG_SUSFS */
+                    
+            #endif /* _LINUX_SUSFS_H */
+            EOF
           fi
           
           # Check for SUSFS source
           if [ ! -f "common/fs/susfs/sus_su.c" ] && [ ! -f "common/fs/susfs/susfs.c" ]; then
             echo "❌ Missing SUSFS source files - creating minimal stub"
             cat > common/fs/susfs/sus_su.c << 'EOF'
-// SPDX-License-Identifier: GPL-2.0
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/susfs.h>
-
-bool susfs_is_current_proc_umounted(void)
-{
-    return false;
-}
-EXPORT_SYMBOL(susfs_is_current_proc_umounted);
-
-int __init susfs_init(void)
-{
-    pr_info("SUSFS: initialized (stub version)\n");
-    return 0;
-}
-
-module_init(susfs_init);
-MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("SUSFS - Super User File System");
-EOF
+          // SPDX-License-Identifier: GPL-2.0
+          #include <linux/module.h>
+          #include <linux/kernel.h>
+          #include <linux/susfs.h>
+          
+          bool susfs_is_current_proc_umounted(void)
+          {
+              return false;
+          }
+          EXPORT_SYMBOL(susfs_is_current_proc_umounted);
+          
+          int __init susfs_init(void)
+          {
+              pr_info("SUSFS: initialized (stub version)\n");
+              return 0;
+          }
+          
+          module_init(susfs_init);
+          MODULE_LICENSE("GPL");
+          MODULE_DESCRIPTION("SUSFS - Super User File System");
+          EOF
           fi
           
           echo "✓ SUSFS source files verified"
