@@ -216,7 +216,7 @@ jobs:
     # --------------------------------------------------
     # BUILD
     # --------------------------------------------------
-    - name: Build with retry
+    - name: Build with retry (keepalive)
       uses: nick-fields/retry@v3
       with:
         timeout_minutes: 90
@@ -226,40 +226,61 @@ jobs:
           set -e
           cd "$GITHUB_WORKSPACE"
     
+          # -----------------------------
+          # Keepalive gegen GitHub Timeout
+          # -----------------------------
+          ( while sleep 300; do
+              echo "[keepalive] build still running at $(date -u)"
+            done ) &
+          KEEPALIVE_PID=$!
+          trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
+    
+          # -----------------------------
+          # Build-Config Fixes
+          # -----------------------------
           sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
           sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64 || true
           sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
     
+          # -----------------------------
+          # Build
+          # -----------------------------
           if [ -f "build/build.sh" ]; then
             LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 \
               build/build.sh CC="/usr/bin/ccache clang"
           else
             tools/bazel build --config=fast //common:kernel_aarch64_dist
           fi
-
-    # --------------------------------------------------
-    # CCACHE STATS
-    # --------------------------------------------------
-    - name: Show ccache stats
-      run: ccache --show-stats
-
-# --------------------------------------------------
-# PACKAGE
-# --------------------------------------------------
-    - name: Package AnyKernel3
-      run: |
-        set -e
     
-        IMG=$(ls out/*/dist/Image 2>/dev/null || ls bazel-bin/common/kernel_aarch64/Image)
-    
-        echo "Using kernel image: $IMG"
-        cp "$IMG" AnyKernel3/Image
-    
-        cd AnyKernel3
-        zip -r ../kernel.zip .
+          # -----------------------------
+          # Keepalive sauber beenden
+          # -----------------------------
+          kill $KEEPALIVE_PID 2>/dev/null || true
+          trap - EXIT
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: kernel
-        path: kernel.zip
+          # --------------------------------------------------
+          # CCACHE STATS
+          # --------------------------------------------------
+          - name: Show ccache stats
+            run: ccache --show-stats
+
+          # --------------------------------------------------
+          # PACKAGE
+          # --------------------------------------------------
+              - name: Package AnyKernel3
+                run: |
+                  set -e
+              
+                  IMG=$(ls out/*/dist/Image 2>/dev/null || ls bazel-bin/common/kernel_aarch64/Image)
+              
+                  echo "Using kernel image: $IMG"
+                  cp "$IMG" AnyKernel3/Image
+              
+                  cd AnyKernel3
+                  zip -r ../kernel.zip .
+          
+              - name: Upload artifact
+                uses: actions/upload-artifact@v4
+                with:
+                  name: kernel
+                  path: kernel.zip
