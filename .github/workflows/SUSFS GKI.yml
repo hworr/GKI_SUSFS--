@@ -234,6 +234,10 @@ jobs:
     
         echo "✓ gki_defconfig synced"
 
+        grep -i baseband_guard arch/arm64/configs/gki_defconfig
+        grep CONFIG_BBG arch/arm64/configs/gki_defconfig
+        
+
     # --------------------------------------------------
     # BUILD
     # --------------------------------------------------
