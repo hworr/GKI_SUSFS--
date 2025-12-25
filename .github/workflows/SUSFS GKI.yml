@@ -196,6 +196,23 @@ jobs:
     
         echo "✓ KernelSU SELinux headers guarded"
 
+    - name: Fake prebuilts clang toolchain pointing to system clang
+      run: |
+        mkdir -p common/prebuilts/clang/host/linux-x86/clang-r0000/bin
+        # symlink system clang into the expected prebuilts path
+        ln -sf "$(command -v clang)" common/prebuilts/clang/host/linux-x86/clang-r0000/bin/clang
+        # If your build expects other tools (clang++, ld.lld, llvm-ar, etc.), link them too
+        for tool in clang++ ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip; do
+          if command -v "$tool" >/dev/null 2>&1; then
+            ln -sf "$(command -v "$tool")" "common/prebuilts/clang/host/linux-x86/clang-r0000/bin/$tool"
+          fi
+        done
+
+    - name: Install clang for kernel build
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang lld llvm
+
     - name: Ensure SELinux flask header (GKI 6.6)
       run: |
         set -e
