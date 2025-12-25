@@ -146,11 +146,11 @@ jobs:
         DEFCONFIG=common/arch/arm64/configs/gki_defconfig
         sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
         cat >> "$DEFCONFIG" << 'EOF'
-CONFIG_SUSFS=y
-CONFIG_KSU_SUSFS=y
-CONFIG_KSU_SUSFS_ENABLE_LOG=y
-CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-EOF
+        CONFIG_SUSFS=y
+        CONFIG_KSU_SUSFS=y
+        CONFIG_KSU_SUSFS_ENABLE_LOG=y
+        CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+        EOF
 
     # --------------------------------------------------
     # Disable GKI defconfig check
