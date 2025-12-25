@@ -303,10 +303,10 @@ jobs:
           if [ ! -f "common/fs/susfs/Makefile" ]; then
             echo "Creating SUSFS Makefile..."
             cat > common/fs/susfs/Makefile << 'EOF'
-# SPDX-License-Identifier: GPL-2.0
-obj-$(CONFIG_SUSFS) += susfs.o
-susfs-y := sus_su.o
-EOF
+          # SPDX-License-Identifier: GPL-2.0
+          obj-$(CONFIG_SUSFS) += susfs.o
+          susfs-y := sus_su.o
+          EOF
           fi
           
           echo "✓ SUSFS build files ready"
