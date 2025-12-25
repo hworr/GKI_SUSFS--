@@ -85,6 +85,12 @@ jobs:
         $REPO init -u https://android.googlesource.com/kernel/manifest -b common-$BRANCH
         $REPO sync -j$(nproc --all) --fail-fast
 
+        # Cleanup Baseband-Guard if present
+        rm -rf common/security/baseband-guard || true
+        sed -i '/baseband_guard/d' common/security/Kconfig
+        sed -i '/CONFIG_BBG/d' common/arch/arm64/configs/gki_defconfig
+        sed -i 's/,baseband_guard//g' common/arch/arm64/configs/gki_defconfig
+
     # --------------------------------------------------
     # DEPENDENCIES
     # --------------------------------------------------
@@ -109,12 +115,6 @@ jobs:
     # --------------------------------------------------
     # BASEBAND GUARD (PATCH ONLY)
     # --------------------------------------------------
-    - name: Add BBG
-      working-directory: ${{ env.KERNEL_ROOT }}
-      run: |
-          curl -LSs https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
-          echo "CONFIG_BBG=y" >> common/arch/arm64/configs/gki_defconfig
-          sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/lockdown/lockdown,baseband_guard/ } }' common/security/Kconfig
 
     - name: Apply Module Check Bypass
       if: ${{ matrix.build_type == 'Bypass' || matrix.build_type == 'Hakan' }}
