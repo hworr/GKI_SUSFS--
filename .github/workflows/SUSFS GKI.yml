@@ -92,6 +92,40 @@ jobs:
         cp -r susfs4ksu/kernel_patches/fs/* common/fs/
         cp -r susfs4ksu/kernel_patches/include/linux/* common/include/linux/
 
+        - name: Enable SUSFS (FINAL, GKI-safe)
+          run: |
+            set -e
+    
+            DEFCONFIG="common/arch/arm64/configs/gki_defconfig"
+    
+            if [ ! -f "$DEFCONFIG" ]; then
+              echo "❌ gki_defconfig not found"
+              exit 1
+            fi
+    
+            echo "==> Enabling SUSFS in gki_defconfig"
+    
+            # 🔥 Wichtig: alte Reste entfernen
+            sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
+            sed -i '/^CONFIG_KSU_SUSFS/d' "$DEFCONFIG"
+    
+            # ✅ SUSFS sauber aktivieren
+            cat >> "$DEFCONFIG" << 'EOF'
+    
+        # ==========================
+        # SUSFS (FINAL)
+        # ==========================
+        CONFIG_SUSFS=y
+        CONFIG_KSU_SUSFS=y
+        CONFIG_SUSFS_PROC=y
+        CONFIG_SUSFS_MAGIC_MOUNT=y
+        CONFIG_SUSFS_AUTO_BIND=y
+        CONFIG_SUSFS_SUS_PATH=y
+        EOF
+    
+            echo "✓ SUSFS enabled"
+            grep CONFIG_SUSFS "$DEFCONFIG" || true
+
     # --------------------------------------------------
     # ✅ KERNELSU (SukiSU) AFTER SUSFS
     # --------------------------------------------------
