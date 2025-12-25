@@ -588,15 +588,27 @@ jobs:
             )/' common/BUILD.bazel
             fi
     
-      - name: Final KernelSU + SUSFS config
-        working-directory: ${{ env.KERNEL_ROOT }}
+      - name: Final KernelSU + SUSFS defconfig
         run: |
           set -e
       
+          echo "Workspace:"
+          pwd
+          ls -lah
+      
+          # GKI root = workspace
+          if [ ! -f common/arch/arm64/configs/gki_defconfig ]; then
+            echo "❌ gki_defconfig not found"
+            exit 1
+          fi
+      
           DEFCONFIG=common/arch/arm64/configs/gki_defconfig
       
+          echo "Cleaning old KSU / SUSFS entries..."
           sed -i '/^CONFIG_KSU/d' "$DEFCONFIG"
           sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
+      
+          echo "Applying final KernelSU + SUSFS config..."
       
           cat >> "$DEFCONFIG" << 'EOF'
           CONFIG_KSU=y
@@ -609,9 +621,9 @@ jobs:
           CONFIG_TMPFS_XATTR=y
           CONFIG_TMPFS_POSIX_ACL=y
           EOF
-      
+
           echo "✓ Final KernelSU + SUSFS config applied"
-          grep -E '^CONFIG_(KSU|SUSFS)' "$DEFCONFIG"
+          grep -E '^CONFIG_(KSU|SUSFS)' "$DEFCONFIG" || true
 
       - name: Config Kernel Name
         run: |
