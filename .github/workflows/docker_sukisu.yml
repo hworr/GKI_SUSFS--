@@ -98,7 +98,6 @@ jobs:
     # KernelSU (SUKISU)
     # --------------------------------------------------
     - name: Add SukiSU
-      if: ${{ inputs.kernelsu_variant == 'SukiSU' }}
       run: |
         curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
     # --------------------------------------------------
