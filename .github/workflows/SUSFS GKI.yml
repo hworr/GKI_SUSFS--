@@ -228,6 +228,17 @@ jobs:
          make ARCH=arm64 savedefconfig
          cp defconfig arch/arm64/configs/gki_defconfig
 
+          cd common
+          
+          if grep -q 'security/selinux/include/security.h' drivers/kernelsu/allowlist.c; then
+            sed -i \
+              's|#include <security/selinux/include/security.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n#include <security/selinux/include/security.h>\n#endif|' \
+              drivers/kernelsu/allowlist.c
+            echo "✓ SELinux include guarded"
+          else
+            echo "ℹ SELinux include already patched or not present"
+          fi
+
     # --------------------------------------------------
     # BUILD
     # --------------------------------------------------
