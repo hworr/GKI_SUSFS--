@@ -114,6 +114,10 @@ jobs:
         set -e
         curl -LSs https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
         sed -i '/^config LSM$/,/^help$/{/default/ s/lockdown/lockdown,baseband_guard/}' common/security/Kconfig
+        Apply Baseband Guard
+        CONFIG_BBG=y
+        sed -i '... baseband_guard ...'
+        curl vc-teahouse/Baseband-guard
 
     # --------------------------------------------------
     # KERNELSU (SUKISU)
@@ -202,6 +206,12 @@ jobs:
         cd common
         make ARCH=arm64 savedefconfig
         cp defconfig arch/arm64/configs/gki_defconfig
+
+        rm -rf common/security/baseband-guard || true
+        sed -i '/baseband_guard/d' common/security/Kconfig
+        sed -i '/CONFIG_BBG/d' common/arch/arm64/configs/gki_defconfig
+
+        
 
     # --------------------------------------------------
     # BUILD
