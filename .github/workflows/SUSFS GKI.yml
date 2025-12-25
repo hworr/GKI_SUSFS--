@@ -188,29 +188,29 @@ jobs:
           kill $KEEPALIVE_PID 2>/dev/null || true
           trap - EXIT
 
-    # --------------------------------------------------
-    # CCACHE STATS
-    # --------------------------------------------------
-    - name: Show ccache stats
-      run: ccache --show-stats
+        # --------------------------------------------------
+        # CCACHE STATS
+        # --------------------------------------------------
+        - name: Show ccache stats
+          run: ccache --show-stats
 
-# --------------------------------------------------
-# PACKAGE
-# --------------------------------------------------
-    - name: Package AnyKernel3
-      run: |
-        set -e
+    # --------------------------------------------------
+    # PACKAGE
+    # --------------------------------------------------
+        - name: Package AnyKernel3
+          run: |
+            set -e
+        
+            IMG=$(ls out/*/dist/Image 2>/dev/null || ls bazel-bin/common/kernel_aarch64/Image)
+        
+            echo "Using kernel image: $IMG"
+            cp "$IMG" AnyKernel3/Image
+        
+            cd AnyKernel3
+            zip -r ../kernel.zip .
     
-        IMG=$(ls out/*/dist/Image 2>/dev/null || ls bazel-bin/common/kernel_aarch64/Image)
-    
-        echo "Using kernel image: $IMG"
-        cp "$IMG" AnyKernel3/Image
-    
-        cd AnyKernel3
-        zip -r ../kernel.zip .
-
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: kernel
-        path: kernel.zip
+        - name: Upload artifact
+          uses: actions/upload-artifact@v4
+          with:
+            name: kernel
+            path: kernel.zip
