@@ -190,49 +190,6 @@ jobs:
           echo "✓ KernelSU SELinux headers guarded"
 
       # --------------------------------------------------
-      # GENERATE FLASK.H IF NEEDED
-      # --------------------------------------------------
-      - name: Generate flask.h if needed
-        run: |
-          set -e
-          HEADER_DIR="common/security/selinux/include"
-
-          if [ ! -f "$HEADER_DIR/flask.h" ]; then
-            echo "flask.h not found, preparing kernel to generate SELinux headers..."
-
-            # Versuche, vorhandene Clang-Toolchains zu finden
-            shopt -s nullglob
-            CLANG_CANDIDATES=(common/prebuilts/clang/host/linux-x86/clang-*/bin)
-            shopt -u nullglob
-
-            if [ ${#CLANG_CANDIDATES[@]} -eq 0 ]; then
-              echo "No prebuilts clang toolchain found, using system clang..."
-              if ! command -v clang >/dev/null 2>&1; then
-                echo "clang toolchain not found"
-                exit 1
-              fi
-            else
-              CLANG_BIN=$(printf '%s\n' "${CLANG_CANDIDATES[@]}" \
-                | sed -E 's|.*/clang-r([0-9]+).*| \1 &|' \
-                | sort -k1,1nr \
-                | head -n 1 \
-                | cut -d' ' -f2-)
-
-              if [ -z "$CLANG_BIN" ] || [ ! -d "$CLANG_BIN" ]; then
-                echo "clang toolchain not found (invalid prebuilts path)"
-                exit 1
-              fi
-
-              export PATH="$PWD/$CLANG_BIN:$PATH"
-            fi
-
-            # Konfiguration vorbereiten, falls keine .config existiert
-            if [ ! -f common/.config ]; then
-              echo "Preparing kernel config for SELinux headers..."
-              make -C common LLVM=1 ARCH=arm64 gki_defconfig
-            fi
-
-      # --------------------------------------------------
       # GKI DEFCONFIG MERGE
       # --------------------------------------------------
       - name: Merge kernel config (GKI safe)
