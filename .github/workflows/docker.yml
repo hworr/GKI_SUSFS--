@@ -242,16 +242,30 @@ jobs:
         cp .config "$DEFCONFIG"
         echo "Merged config summary:"
         grep -E 'CONFIG_(KSU|SUSFS|CFG80211|MAC80211|USB_GADGET|BBR)' "$DEFCONFIG"
+         
     - name: Sync gki_defconfig (savedefconfig)
       run: |
         cd common
-        sed -i '...' security/Kconfig
-        make ARCH=arm64 savedefconfig
-        cp defconfig arch/arm64/configs/gki_defconfig
+                
+                # --- Baseband-Guard sauber entfernen ---
+                rm -rf security/baseband-guard || true
+                sed -i '/baseband_guard/d' security/Kconfig || true
+                sed -i '/CONFIG_BBG/d' arch/arm64/configs/gki_defconfig || true
+                
+                # --- Defconfig sauber neu generieren ---
+                make ARCH=arm64 savedefconfig
+                cp defconfig arch/arm64/configs/gki_defconfig
+                
+                # --- KernelSU SELinux Guard (flask.h Fix) ---
+                if grep -q 'security/selinux/include/security.h' drivers/kernelsu/allowlist.c; then
+                  sed -i \
+                    's|#include <security/selinux/include/security.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n#include <security/selinux/include/security.h>\n#endif|' \
+                    drivers/kernelsu/allowlist.c
+                  echo "✓ SELinux include guarded"
+                else
+                  echo "ℹ SELinux include already patched or not present"
+                fi
 
-        rm -rf common/security/baseband-guard || true
-        sed -i '/baseband_guard/d' common/security/Kconfig
-        sed -i '/CONFIG_BBG/d' common/arch/arm64/configs/gki_defconfig
 
     # --------------------------------------------------
     # BUILD
