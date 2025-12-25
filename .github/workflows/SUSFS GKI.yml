@@ -222,6 +222,7 @@ jobs:
     - name: Sync gki_defconfig (savedefconfig)
       run: |
         cd common
+        sed -i '...' security/Kconfig
         make ARCH=arm64 savedefconfig
         cp defconfig arch/arm64/configs/gki_defconfig
 
