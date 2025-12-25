@@ -190,6 +190,51 @@ jobs:
           echo "✓ KernelSU SELinux headers guarded"
 
       # --------------------------------------------------
+      # GENERATE FLASK.H (WITH SELINUX ENABLED)
+      # --------------------------------------------------
+      - name: Generate flask.h with SELinux enabled
+        run: |
+          set -e
+          HEADER_DIR="common/security/selinux/include"
+
+          if [ ! -f "$HEADER_DIR/flask.h" ]; then
+            echo "flask.h not found, generating SELinux headers..."
+
+            cd common
+
+            # Stelle sicher, dass SELinux in der Config aktiviert ist
+            if [ ! -f .config ]; then
+              echo "Creating initial kernel config..."
+              make ARCH=arm64 LLVM=1 gki_defconfig
+            fi
+
+            # SELinux explizit aktivieren für flask.h Generation
+            echo "Enabling CONFIG_SECURITY_SELINUX..."
+            scripts/config --enable CONFIG_SECURITY
+            scripts/config --enable CONFIG_SECURITY_SELINUX
+            scripts/config --enable CONFIG_SECURITY_SELINUX_DEVELOP
+            
+            # Config neu generieren mit SELinux
+            make ARCH=arm64 LLVM=1 olddefconfig
+
+            echo "Generating SELinux headers (flask.h)..."
+            make ARCH=arm64 LLVM=1 prepare
+
+            cd ..
+
+            if [ ! -f "$HEADER_DIR/flask.h" ]; then
+              echo "❌ Failed to generate flask.h"
+              echo "Checking if SELinux source exists..."
+              ls -la common/security/selinux/ || true
+              exit 1
+            fi
+
+            echo "✓ Successfully generated flask.h"
+          else
+            echo "✓ flask.h already present"
+          fi
+
+      # --------------------------------------------------
       # GKI DEFCONFIG MERGE
       # --------------------------------------------------
       - name: Merge kernel config (GKI safe)
