@@ -38,179 +38,226 @@ jobs:
       CCACHE_CPP2: "yes"
 
     steps:
-    # --------------------------------------------------
-    # SPACE + TOOLS
-    # --------------------------------------------------
-    - name: Maximize build space
-      uses: easimon/maximize-build-space@master
+      # --------------------------------------------------
+      # SPACE + TOOLS
+      # --------------------------------------------------
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
 
-    - name: Install dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y git curl python3 ccache
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y git curl python3 ccache
 
-    # --------------------------------------------------
-    # CCACHE
-    # --------------------------------------------------
-    - name: Restore ccache
-      uses: actions/cache@v4
-      with:
-        path: /home/runner/.ccache
-        key: ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
-        restore-keys: |
-          ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-
-          ccache-${{ inputs.android_version }}-
-          ccache-
+      # --------------------------------------------------
+      # CCACHE
+      # --------------------------------------------------
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
+          restore-keys: |
+            ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-
+            ccache-${{ inputs.android_version }}-
+            ccache-
 
-    - name: Setup ccache
-      run: |
-        ccache --max-size=10G
-        ccache --set-config=compression=true
-        ccache --zero-stats
+      - name: Setup ccache
+        run: |
+          ccache --max-size=10G
+          ccache --set-config=compression=true
+          ccache --zero-stats
 
-    # --------------------------------------------------
-    # REPO + KERNEL
-    # --------------------------------------------------
-    - name: Install repo tool
-      run: |
-          sed -i \
-            's|#include <security/selinux/include/security.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n#include <security/selinux/include/security.h>\n#endif|' \
-            "$f" || true
-    
-          sed -i \
-            's|#include <security/selinux/include/objsec.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n#include <security/selinux/include/objsec.h>\n#endif|' \
-            "$f" || true
-        done
-    
-        echo "✓ KernelSU SELinux headers guarded"
-
-    - name: Fake prebuilts clang toolchain pointing to system clang
-      run: |
-        mkdir -p common/prebuilts/clang/host/linux-x86/clang-r0000/bin
-        # symlink system clang into the expected prebuilts path
-        ln -sf "$(command -v clang)" common/prebuilts/clang/host/linux-x86/clang-r0000/bin/clang
-        # If your build expects other tools (clang++, ld.lld, llvm-ar, etc.), link them too
-        for tool in clang++ ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip; do
-          if command -v "$tool" >/dev/null 2>&1; then
-            ln -sf "$(command -v "$tool")" "common/prebuilts/clang/host/linux-x86/clang-r0000/bin/$tool"
-          fi
-        done
-
-    - name: Install clang for kernel build
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y clang lld llvm
-        HEADER_DIR="common/security/selinux/include"
-
-        if [ ! -f "$HEADER_DIR/flask.h" ]; then
-          shopt -s nullglob
-          CLANG_CANDIDATES=(common/prebuilts/clang/host/linux-x86/clang-*/bin)
-          shopt -u nullglob
+      # Cache zuerst prüfen
+      - name: Restore kernel source cache
+        id: kernel-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.KERNEL_ROOT }}
+          key: kernel-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
       
-          if [ ${#CLANG_CANDIDATES[@]} -eq 0 ]; then
-            echo "No prebuilts clang toolchain found, trying system clang..."
-            if ! command -v clang >/dev/null 2>&1; then
-              echo "clang toolchain not found (no prebuilts and no system clang on PATH)"
-              exit 1
-            fi
-            # Rely on system clang; no PATH modification needed
-          else
-            CLANG_BIN=$(printf '%s\n' "${CLANG_CANDIDATES[@]}" \
-              | sed -E 's|.*/clang-r([0-9]+).*| \1 &|' \
-              | sort -k1,1nr \
-              | head -n 1 \
-              | cut -d' ' -f2-)
-            if [ -z "$CLANG_BIN" ] || [ ! -d "$CLANG_BIN" ]; then
-              echo "clang toolchain not found (invalid prebuilts path)"
-              exit 1
-            fi
-            export PATH="$PWD/$CLANG_BIN:$PATH"
-          fi
-
-          if [ ! -f common/.config ]; then
-            echo "Preparing kernel config for SELinux headers..."
-            make -C common LLVM=1 ARCH=arm64 gki_defconfig
-          fi
-          echo "Generating SELinux headers (flask.h)..."
-          make -C common LLVM=1 ARCH=arm64 prepare
-
-          test -s "$HEADER_DIR/flask.h" || { echo "Failed to generate flask.h at $HEADER_DIR/flask.h. Ensure CONFIG_SECURITY_SELINUX is enabled in the kernel sources and the tree is synced."; exit 1; }
-          echo "✓ Generated flask.h via kernel prepare"
-        else
-          echo "✓ flask.h already present"
-        fi
-
-    - name: Sync gki_defconfig
-      run: |
-        cd common
-    
-        rm -rf security/baseband-guard || true
-        sed -i '/baseband_guard/d' security/Kconfig || true
-        sed -i '/CONFIG_BBG/d' arch/arm64/configs/gki_defconfig || true
-    
-        make ARCH=arm64 savedefconfig
-        cp defconfig arch/arm64/configs/gki_defconfig
-    
-        echo "✓ gki_defconfig synced"
-    
-        grep -i baseband_guard arch/arm64/configs/gki_defconfig || true
-        grep CONFIG_BBG arch/arm64/configs/gki_defconfig || true
-        
-
-    # --------------------------------------------------
-    # BUILD
-    # --------------------------------------------------
-    - name: Build with retry
-      uses: nick-fields/retry@v3
-      with:
-        timeout_minutes: 90
-        max_attempts: 2
-        retry_on: timeout
-        command: |
+      # Nur wenn Cache NICHT da ist → repo init + sync
+      - name: Initialize and Sync Kernel Source
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        working-directory: ${{ env.KERNEL_ROOT }}
+        run: |
           set -e
-          cd "$GITHUB_WORKSPACE"
+          FORMATTED_BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
 
-          sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
-          sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64 || true
-          sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
+          echo "==> repo init"
+          $REPO init -u https://android.googlesource.com/kernel/manifest \
+            -b common-${FORMATTED_BRANCH}
+      
+          REMOTE_BRANCH=$(git ls-remote https://android.googlesource.com/kernel/common ${FORMATTED_BRANCH})
+          DEFAULT_MANIFEST_PATH=.repo/manifests/default.xml
+          if grep -q deprecated <<< "$REMOTE_BRANCH"; then
+            sed -i "s/\"${FORMATTED_BRANCH}\"/\"deprecated\/${FORMATTED_BRANCH}\"/g" "$DEFAULT_MANIFEST_PATH"
+          fi
+      
+          echo "==> repo sync"
+          $REPO sync -j$(nproc --all) --fail-fast
 
-          ( while sleep 300; do echo "[keepalive] build still running at $(date -u)"; done ) &
-          KEEPALIVE_PID=$!
-          trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
+          # Alle relevanten Dateien finden, in denen die Includes vorkommen
+          files=$(grep -rl "security/selinux/include/security.h" common 2>/dev/null || true)
+          files+=" "$(grep -rl "security/selinux/include/objsec.h" common 2>/dev/null || true)
 
-          if [ -f "build/build.sh" ]; then
-            LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 \
-              build/build.sh CC="/usr/bin/ccache clang"
+          for f in $files; do
+            echo "Patching SELinux includes in $f"
+            sed -i \
+              's|#include <security/selinux/include/security.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n#include <security/selinux/include/security.h>\n#endif|' \
+              "$f" || true
+
+            sed -i \
+              's|#include <security/selinux/include/objsec.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n#include <security/selinux/include/objsec.h>\n#endif|' \
+              "$f" || true
+          done
+
+          echo "✓ KernelSU SELinux headers guarded"
+
+      - name: Fake prebuilts clang toolchain pointing to system clang
+        run: |
+          set -e
+          mkdir -p common/prebuilts/clang/host/linux-x86/clang-r0000/bin
+
+          # symlink system clang into the expected prebuilts path
+          ln -sf "$(command -v clang)" common/prebuilts/clang/host/linux-x86/clang-r0000/bin/clang
+
+          # Wenn weitere Tools erwartet werden (clang++, ld.lld, llvm-*), ebenfalls verlinken
+          for tool in clang++ ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              ln -sf "$(command -v "$tool")" "common/prebuilts/clang/host/linux-x86/clang-r0000/bin/$tool"
+            fi
+          done
+
+      - name: Install clang for kernel build & generate flask.h if needed
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm
+
+          HEADER_DIR="common/security/selinux/include"
+
+          if [ ! -f "$HEADER_DIR/flask.h" ]; then
+            echo "flask.h not found, preparing kernel to generate SELinux headers..."
+
+            # Versuche, vorhandene Clang-Toolchains zu finden
+            shopt -s nullglob
+            CLANG_CANDIDATES=(common/prebuilts/clang/host/linux-x86/clang-*/bin)
+            shopt -u nullglob
+
+            if [ ${#CLANG_CANDIDATES[@]} -eq 0 ]; then
+              echo "No prebuilts clang toolchain found, trying system clang..."
+              if ! command -v clang >/dev/null 2>&1; then
+                echo "clang toolchain not found (no prebuilts and no system clang on PATH)"
+                exit 1
+              fi
+              # System clang wird verwendet, PATH muss nicht angepasst werden
+            else
+              CLANG_BIN=$(printf '%s\n' "${CLANG_CANDIDATES[@]}" \
+                | sed -E 's|.*/clang-r([0-9]+).*| \1 &|' \
+                | sort -k1,1nr \
+                | head -n 1 \
+                | cut -d' ' -f2-)
+
+              if [ -z "$CLANG_BIN" ] || [ ! -d "$CLANG_BIN" ]; then
+                echo "clang toolchain not found (invalid prebuilts path)"
+                exit 1
+              fi
+
+              export PATH="$PWD/$CLANG_BIN:$PATH"
+            fi
+
+            # Konfiguration vorbereiten, falls keine .config existiert
+            if [ ! -f common/.config ]; then
+              echo "Preparing kernel config for SELinux headers..."
+              make -C common LLVM=1 ARCH=arm64 gki_defconfig
+            fi
+
+            echo "Generating SELinux headers (flask.h)..."
+            make -C common LLVM=1 ARCH=arm64 prepare
+
+            test -s "$HEADER_DIR/flask.h" || {
+              echo "Failed to generate flask.h at $HEADER_DIR/flask.h. Ensure CONFIG_SECURITY_SELINUX is enabled in the kernel sources and the tree is synced."
+              exit 1
+            }
+
+            echo "✓ Generated flask.h via kernel prepare"
           else
-            tools/bazel build --config=fast //common:kernel_aarch64_dist
+            echo "✓ flask.h already present"
           fi
 
-          kill $KEEPALIVE_PID 2>/dev/null || true
-          trap - EXIT
+      - name: Sync gki_defconfig (remove baseband guard)
+        run: |
+          set -e
+          cd common
 
-        # --------------------------------------------------
-        # CCACHE STATS
-        # --------------------------------------------------
-        - name: Show ccache stats
-          run: ccache --show-stats
+          rm -rf security/baseband-guard || true
+          sed -i '/baseband_guard/d' security/Kconfig || true
+          sed -i '/CONFIG_BBG/d' arch/arm64/configs/gki_defconfig || true
 
-    # --------------------------------------------------
-    # PACKAGE
-    # --------------------------------------------------
-        - name: Package AnyKernel3
-          run: |
+          make ARCH=arm64 savedefconfig
+          cp defconfig arch/arm64/configs/gki_defconfig
+
+          echo "✓ gki_defconfig synced"
+
+          grep -i baseband_guard arch/arm64/configs/gki_defconfig || true
+          grep CONFIG_BBG arch/arm64/configs/gki_defconfig || true
+
+      # --------------------------------------------------
+      # BUILD
+      # --------------------------------------------------
+      - name: Build with retry
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 90
+          max_attempts: 2
+          retry_on: timeout
+          command: |
             set -e
-        
-            IMG=$(ls out/*/dist/Image 2>/dev/null || ls bazel-bin/common/kernel_aarch64/Image)
-        
-            echo "Using kernel image: $IMG"
-            cp "$IMG" AnyKernel3/Image
-        
-            cd AnyKernel3
-            zip -r ../kernel.zip .
-    
-        - name: Upload artifact
-          uses: actions/upload-artifact@v4
-          with:
-            name: kernel
-            path: kernel.zip
+            cd "$GITHUB_WORKSPACE"
+
+            sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
+            sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64 || true
+            sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
+
+            ( while sleep 300; do echo "[keepalive] build still running at $(date -u)"; done ) &
+            KEEPALIVE_PID=$!
+            trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
+
+            if [ -f "build/build.sh" ]; then
+              LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 \
+                build/build.sh CC="/usr/bin/ccache clang"
+            else
+              tools/bazel build --config=fast //common:kernel_aarch64_dist
+            fi
+
+            kill $KEEPALIVE_PID 2>/dev/null || true
+            trap - EXIT
+
+      # --------------------------------------------------
+      # CCACHE STATS
+      # --------------------------------------------------
+      - name: Show ccache stats
+        run: ccache --show-stats
+
+      # --------------------------------------------------
+      # PACKAGE
+      # --------------------------------------------------
+      - name: Package AnyKernel3
+        run: |
+          set -e
+
+          # Versuche zuerst out/*/dist/Image, ansonsten Bazel-Ausgabe
+          IMG=$(ls out/*/dist/Image 2>/dev/null || ls bazel-bin/common/kernel_aarch64/Image)
+
+          echo "Using kernel image: $IMG"
+          cp "$IMG" AnyKernel3/Image
+
+          cd AnyKernel3
+          zip -r ../kernel.zip .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel
+          path: kernel.zip
