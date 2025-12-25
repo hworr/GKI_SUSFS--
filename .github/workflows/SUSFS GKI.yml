@@ -625,9 +625,7 @@ jobs:
           echo "✓ Final KernelSU + SUSFS config applied"
           grep -E '^CONFIG_(KSU|SUSFS)' "$DEFCONFIG" || true
 
-# --------------------------------------------------
-# Kernel version / branding (UTS, localversion, stamp)
-# --------------------------------------------------
+
       - name: Config Kernel Name
         run: |
           set -e
@@ -667,38 +665,34 @@ jobs:
           fi
       
           echo "✓ Kernel version branding applied"
-          # -----------------------------
-          # Build Kernel (CCache + GKI)
-          # -----------------------------
-          - name: Build Kernel
-            run: |
-              set -e
-              set -x
+     
+      - name: Build Kernel
+        run: |
+          set -e
+          set -x
+      
+          echo "Building the kernel..."
+      
+          sed -i \
+            -e 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' \
+            -e '/MODULES_ORDER=android\/gki_aarch64_modules/d' \
+            -e '/KMI_SYMBOL_LIST_STRICT_MODE/d' \
+            common/build.config.gki.aarch64
+      
+          if [ -x build/build.sh ]; then
+            LTO=thin \
+            BUILD_CONFIG=common/build.config.gki.aarch64 \
+            build/build.sh CC="/usr/bin/ccache clang"
+          else
+            tools/bazel build \
+              --disk_cache=/home/runner/.cache/bazel \
+              --config=fast \
+              //common:kernel_aarch64_dist
+          fi
+      
+          ccache --show-stats
           
-              echo "Building the kernel..."
-          
-              sed -i \
-                -e 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' \
-                -e '/MODULES_ORDER=android\/gki_aarch64_modules/d' \
-                -e '/KMI_SYMBOL_LIST_STRICT_MODE/d' \
-                common/build.config.gki.aarch64
-          
-              if [ -x build/build.sh ]; then
-                LTO=thin \
-                BUILD_CONFIG=common/build.config.gki.aarch64 \
-                build/build.sh CC="/usr/bin/ccache clang"
-              else
-                tools/bazel build \
-                  --disk_cache=/home/runner/.cache/bazel \
-                  --config=fast \
-                  //common:kernel_aarch64_dist
-              fi
-          
-              ccache --show-stats
-          
-          # -----------------------------
-          # Optional Kernel Image Patch
-          # -----------------------------
+  
           - name: Patch Kernel Image (optional)
             if: ${{ inputs.kernel_version != '6.6' }}
             run: |
@@ -724,9 +718,7 @@ jobs:
           
               # ./patch_linux   # bewusst deaktiviert
           
-          # -----------------------------
-          # Collect Kernel Images
-          # -----------------------------
+     
           - name: Collect Kernel Images
             run: |
               set -e
@@ -747,30 +739,26 @@ jobs:
               cp bootimgs/Image .
               gzip -n -k -f -9 Image
           
-          # -----------------------------
-          # Create AnyKernel3 ZIP
-          # -----------------------------
+
           - name: Create AnyKernel3 ZIP
             run: |
               set -e
           
-              ZIP_NAME="${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ inputs.sub_level }}-${{ inputs.os_patch_level }}-AnyKernel3.zip"
+              ZIP_NAME="android15-6.6.98-2025-09-AnyKernel3.zip"
           
               cd AnyKernel3
-          
               rm -f Image Image.lz4 Image.gz
               cp ../Image .
           
               zip -r "../$ZIP_NAME" . -x "*.git*" "README.md"
               rm -f Image
           
-          # -----------------------------
-          # Upload Artifacts
-          # -----------------------------
-          - name: Upload Build Artifacts
-            uses: actions/upload-artifact@v4
-            with:
-              name: kernel-${{ inputs.android_version }}-${{ inputs.kernel_version }}
-              path: |
-                *.zip
+     
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-android15-6.6
+          path: |
+            *.zip
+            bootimgs/*
                 bootimgs/*
