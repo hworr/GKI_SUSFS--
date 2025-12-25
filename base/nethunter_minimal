@@ -1,0 +1,182 @@
+name: GKI Kernel Build (SukiSU + SUSFS + NetHunter)
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      android_version:
+        required: true
+        type: string
+      kernel_version:
+        required: true
+        type: string
+      os_patch_level:
+        required: true
+        type: string
+      kernelsu_variant:
+        required: true
+        type: string
+      kernelsu_branch:
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      CCACHE_DIR: /home/runner/.ccache
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+
+    steps:
+    # --------------------------------------------------
+    # SPACE + TOOLS
+    # --------------------------------------------------
+    - uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 8192
+        swap-size-mb: 8192
+        remove-dotnet: "true"
+        remove-android: "true"
+        remove-haskell: "true"
+        remove-codeql: "true"
+
+    - name: Install deps
+      run: sudo apt update && sudo apt install -y git curl ccache python3
+
+    - name: Setup ccache
+      run: |
+        ccache --max-size=3G
+        ccache --set-config=compression=true
+    - uses: actions/cache@v4
+      with:
+        path: ~/.ccache
+        key: ccache-${{ github.sha }}
+        restore-keys: ccache-
+
+    # --------------------------------------------------
+    # REPO
+    # --------------------------------------------------
+    - name: Install repo tool
+      run: |
+        mkdir -p git-repo
+        curl -s https://storage.googleapis.com/git-repo-downloads/repo > git-repo/repo
+        chmod +x git-repo/repo
+        echo "REPO=$GITHUB_WORKSPACE/git-repo/repo" >> $GITHUB_ENV
+    - name: Repo init & sync
+      run: |
+        BRANCH="android15-6.6-${{ inputs.os_patch_level }}"
+        $REPO init -u https://android.googlesource.com/kernel/manifest -b common-$BRANCH
+        $REPO sync -j$(nproc --all) --fail-fast
+    # --------------------------------------------------
+    # EXTERNAL PATCHES
+    # --------------------------------------------------
+    - name: Clone deps
+      run: |
+        git clone https://github.com/ShirkNeko/susfs4ksu.git
+        git clone https://github.com/ShirkNeko/SukiSU_patch.git
+        git clone https://github.com/MiRinChan/AnyKernel3.git
+    # --------------------------------------------------
+    # KernelSU (SukiSU)
+    # --------------------------------------------------
+    - name: Add SukiSU
+      if: ${{ inputs.kernelsu_variant == 'SukiSU' }}
+      run: |
+        curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s builtin
+    # --------------------------------------------------
+    # SUSFS
+    # --------------------------------------------------
+    - name: Apply SUSFS patch
+      working-directory: common
+      run: |
+        patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch || true
+        rm -f fs/proc/*.rej
+    - name: Copy SUSFS files
+      run: |
+        cp susfs4ksu/kernel_patches/fs/* common/fs/
+        cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/
+    # --------------------------------------------------
+    # ✅ SINGLE CONFIG MERGE (KSU + SUSFS + NetHunter)
+    # --------------------------------------------------
+    - name: Merge config (GKI-safe)
+      run: |
+        DEFCONFIG=common/arch/arm64/configs/gki_defconfig
+        MERGE=common/scripts/kconfig/merge_config.sh
+        chmod +x "$MERGE"
+        cat > /tmp/nethunter.config << 'EOF'
+        # KernelSU
+        CONFIG_KSU=y
+        CONFIG_KSU_MANUAL_HOOK=y
+        CONFIG_KSU_KPROBES_HOOK=n
+        
+        # SUSFS
+        CONFIG_SUSFS=y
+        CONFIG_KSU_SUSFS=y
+        CONFIG_SUSFS_PROC=y
+        CONFIG_SUSFS_MAGIC_MOUNT=y
+        CONFIG_SUSFS_AUTO_BIND=y
+        CONFIG_SUSFS_SUS_PATH=y
+        
+        # NetHunter (GKI SAFE)
+        CONFIG_CFG80211=m
+        CONFIG_MAC80211=m
+        CONFIG_USB_RNDIS_HOST=y
+        
+        # Filesystem
+        CONFIG_TMPFS_XATTR=y
+        CONFIG_TMPFS_POSIX_ACL=y
+        
+        # Network
+        CONFIG_TCP_CONG_BBR=y
+        CONFIG_NET_SCH_FQ=y
+        CONFIG_DEFAULT_BBR=y
+        EOF
+        "$MERGE" -m "$DEFCONFIG" /tmp/nethunter.config
+        cp .config "$DEFCONFIG"
+        echo "Final config:"
+        grep -E 'CONFIG_(KSU|SUSFS|CFG80211|MAC80211|BBR)' "$DEFCONFIG"
+    - name: Sync gki_defconfig with savedefconfig (GKI fix)
+      run: |
+        set -e
+        cd common
+    
+        make ARCH=arm64 savedefconfig
+    
+        cp defconfig arch/arm64/configs/gki_defconfig
+    
+        echo "✓ gki_defconfig synced"
+        grep -E 'CONFIG_(KSU|SUSFS|CFG80211|MAC80211|BBR)' arch/arm64/configs/gki_defconfig || true
+
+    # --------------------------------------------------
+    # BUILD
+    # --------------------------------------------------
+    - name: Build kernel
+      run: |
+        sed -i \
+          -e 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' \
+          -e '/MODULES_ORDER=android\/gki_aarch64_modules/d' \
+          -e '/KMI_SYMBOL_LIST_STRICT_MODE/d' \
+          common/build.config.gki.aarch64
+        if [ -x build/build.sh ]; then
+          LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh CC="/usr/bin/ccache clang"
+        else
+          tools/bazel build --config=fast //common:kernel_aarch64_dist
+        fi
+    # --------------------------------------------------
+    # PACKAGE
+    # --------------------------------------------------
+    - name: AnyKernel3
+      run: |
+        IMG=$(ls out/*/dist/Image 2>/dev/null || ls bazel-bin/common/kernel_aarch64/Image)
+        cp "$IMG" AnyKernel3/Image
+        cd AnyKernel3
+        zip -r ../kernel.zip .
+    - uses: actions/upload-artifact@v4
+      with:
+        name: kernel
+        path: kernel.zip
