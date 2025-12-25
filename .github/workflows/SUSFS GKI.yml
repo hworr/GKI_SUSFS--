@@ -332,9 +332,15 @@ jobs:
       
           echo "==> Adding SukiSU"
           curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
-      
+          
           cd KernelSU
-          git revert -m 1 $(git log --grep="KSU_SUKISU" --pretty=format:"%h" -n 1) -n || true
+          REV_COMMIT=$(git log --grep="KSU_SUKISU" --pretty=format:"%h" -n 1 || true)
+          if [ -n "$REV_COMMIT" ]; then
+          echo "Reverting problematic SukiSU commit: $REV_COMMIT"
+          git revert -m 1 "$REV_COMMIT" -n || true
+          else
+          echo "No SukiSU revert needed"
+          fi
 
 
           - name: Set SUSFS path
