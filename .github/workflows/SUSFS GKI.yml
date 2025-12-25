@@ -337,21 +337,27 @@ jobs:
           git revert -m 1 $(git log --grep="KSU_SUKISU" --pretty=format:"%h" -n 1) -n || true
 
 
-      - name: Apply SUSFS core patch (REQUIRED)
-        working-directory: common
-        run: |
-          set -e
-      
-          PATCH="$SUSFS4KSU/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
-      
-          if [ ! -f "$PATCH" ]; then
-            echo "❌ SUSFS core patch missing: $PATCH"
-            exit 1
-          fi
-      
-          echo "==> Applying SUSFS core patch"
-          patch -p1 < "$PATCH" || true
-          rm -f fs/proc/*.rej
+          - name: Set SUSFS path
+            run: |
+              echo "SUSFS4KSU=$GITHUB_WORKSPACE/susfs4ksu" >> $GITHUB_ENV
+
+
+          - name: Apply SUSFS core patch
+            working-directory: common
+            run: |
+              set -e
+          
+              PATCH="$SUSFS4KSU/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
+          
+              if [ ! -f "$PATCH" ]; then
+                echo "❌ SUSFS core patch missing: $PATCH"
+                ls -lah "$SUSFS4KSU/kernel_patches" || true
+                exit 1
+              fi
+          
+              echo "==> Applying SUSFS core patch"
+              patch -p1 < "$PATCH" || true
+              rm -f fs/proc/*.rej
 
 
       - name: Apply SUSFS patches
