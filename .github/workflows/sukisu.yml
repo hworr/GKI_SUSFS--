@@ -1,4 +1,4 @@
-name: SukiSU Kernel Build (Fixed)
+name: SukiSU Kernel Build (GKI Fixed)
 
 permissions:
   contents: write
@@ -48,7 +48,7 @@ jobs:
       run: sudo apt update && sudo apt install -y git curl python3 ccache
 
     # --------------------------------------------------
-    # CCACHE (RESTORE)
+    # CCACHE
     # --------------------------------------------------
     - name: Restore ccache
       uses: actions/cache@v4
@@ -92,11 +92,10 @@ jobs:
         git clone https://github.com/MiRinChan/AnyKernel3.git
 
     # --------------------------------------------------
-    # KERNELSU BRANCH LOGIC
+    # KERNELSU BRANCH
     # --------------------------------------------------
     - name: Determine KernelSU branch
       run: |
-        set -e
         if [[ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]]; then
           if [[ "${{ inputs.kernelsu_branch }}" == "Other" ]]; then
             echo "BRANCH=${{ inputs.kernelsu_branch_other }}" >> $GITHUB_ENV
@@ -106,13 +105,12 @@ jobs:
         fi
 
     # --------------------------------------------------
-    # BASEBAND GUARD
+    # BASEBAND GUARD (NO defconfig pollution!)
     # --------------------------------------------------
     - name: Apply Baseband Guard
       run: |
         set -e
         curl -LSs https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
-        echo "CONFIG_BBG=y" >> common/arch/arm64/configs/gki_defconfig
         sed -i '/^config LSM$/,/^help$/{/default/ s/lockdown/lockdown,baseband_guard/}' common/security/Kconfig
 
     # --------------------------------------------------
@@ -121,17 +119,14 @@ jobs:
     - name: Add SukiSU
       if: ${{ inputs.kernelsu_variant == 'SukiSU' }}
       run: |
-        set -e
-        echo "Using BRANCH=$BRANCH"
         curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
 
     # --------------------------------------------------
-    # SUSFS
+    # SUSFS (PATCH ONLY)
     # --------------------------------------------------
     - name: Apply SUSFS core patch
       working-directory: common
       run: |
-        set -e
         PATCH="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
         patch -p1 < "$PATCH" || true
         rm -f fs/proc/*.rej || true
@@ -141,24 +136,28 @@ jobs:
         cp susfs4ksu/kernel_patches/fs/* common/fs/
         cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/
 
-    - name: Enable SUSFS (FINAL)
+    # --------------------------------------------------
+    # GKI DEFCONFIG SANITIZER (CRITICAL)
+    # --------------------------------------------------
+    - name: Sanitize gki_defconfig (GKI safe)
       run: |
+        set -e
         DEFCONFIG=common/arch/arm64/configs/gki_defconfig
+    
+        # ❌ Entfernen (GKI-verboten)
         sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
-        cat >> "$DEFCONFIG" << 'EOF'
-        CONFIG_SUSFS=y
-        CONFIG_KSU_SUSFS=y
-        CONFIG_KSU_SUSFS_ENABLE_LOG=y
-        CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-        EOF
-
-    # --------------------------------------------------
-    # Disable GKI defconfig check
-    # --------------------------------------------------
-    - name: Disable GKI defconfig check
-      run: |
-        sed -i 's/check_defconfig = True/check_defconfig = False/' common/BUILD.bazel || true
-        sed -i 's/check_defconfig=True/check_defconfig=False/' common/BUILD.bazel || true
+        sed -i '/^CONFIG_KSU_SUSFS/d' "$DEFCONFIG"
+        sed -i '/^CONFIG_KSU_SUSFS_ENABLE_LOG/d' "$DEFCONFIG"
+        sed -i '/^CONFIG_KSU_SUSFS_SPOOF_UNAME/d' "$DEFCONFIG"
+        sed -i '/^CONFIG_BBG/d' "$DEFCONFIG"
+    
+        # ✅ KernelSU minimal (GKI-safe)
+        sed -i '/^CONFIG_KSU/d' "$DEFCONFIG"
+    
+        printf '%s\n' \
+          'CONFIG_KSU=y' \
+          'CONFIG_KSU_MANUAL_HOOK=y' \
+          'CONFIG_KSU_KPROBES_HOOK=n' >> "$DEFCONFIG"
 
     # --------------------------------------------------
     # BUILD
@@ -171,7 +170,6 @@ jobs:
         retry_on: timeout
         command: |
           set -e
-          set -x
           cd "$GITHUB_WORKSPACE"
 
           sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
@@ -182,10 +180,7 @@ jobs:
             LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 \
               build/build.sh CC="/usr/bin/ccache clang"
           else
-            tools/bazel build \
-              --disk_cache=/home/runner/.cache/bazel \
-              --config=fast \
-              //common:kernel_aarch64_dist
+            tools/bazel build --config=fast //common:kernel_aarch64_dist
           fi
 
     # --------------------------------------------------
