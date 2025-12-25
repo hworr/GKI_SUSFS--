@@ -269,33 +269,31 @@ jobs:
       - name: Determine the branch for KernelSU
         run: |
           set -e
-          
-            KSU_BRANCH_RAW="${{ inputs.kernelsu_branch }}"
-            KSU_BRANCH="${KSU_BRANCH_RAW%%(*}"
-            KSU_VARIANT="${{ inputs.kernelsu_variant }}"
-            KERNEL_VERSION="${{ inputs.kernel_version }}"
-          
-              echo "DEBUG: branch_raw=$KSU_BRANCH_RAW"
-              echo "DEBUG: branch=$KSU_BRANCH"
-              echo "DEBUG: variant=$KSU_VARIANT"
-          
-              if [[ "$KSU_BRANCH" == "Stable" && "$KSU_VARIANT" == "SukiSU" ]]; then
-                  echo "BRANCH=builtin" >> $GITHUB_ENV
-          
-              elif [[ "$KSU_BRANCH" == "Dev" && "$KSU_VARIANT" == "SukiSU" ]]; then
-                  echo "BRANCH=builtin" >> $GITHUB_ENV
-          
-              elif [[ "$KSU_BRANCH" == "Other" ]]; then
-                  if [[ -n "${{ inputs.kernelsu_branch_other }}" ]]; then
-                      echo "BRANCH=-s ${{ inputs.kernelsu_branch_other }}" >> $GITHUB_ENV
-                  else
-                      echo "❌ Error: Custom branch not provided for 'Other'" >&2
-                      exit 1
-                  fi
+      
+          KSU_BRANCH_RAW="${{ inputs.kernelsu_branch }}"
+          KSU_BRANCH="${KSU_BRANCH_RAW%%(*}"
+          KSU_VARIANT="${{ inputs.kernelsu_variant }}"
+      
+          echo "DEBUG: branch_raw=$KSU_BRANCH_RAW"
+          echo "DEBUG: branch=$KSU_BRANCH"
+          echo "DEBUG: variant=$KSU_VARIANT"
+      
+          if [[ "$KSU_VARIANT" == "SukiSU" ]]; then
+            if [[ "$KSU_BRANCH" == "Stable" || "$KSU_BRANCH" == "Dev" ]]; then
+              echo "BRANCH=builtin" >> "$GITHUB_ENV"
+      
+            elif [[ "$KSU_BRANCH" == "Other" ]]; then
+              if [[ -n "${{ inputs.kernelsu_branch_other }}" ]]; then
+                echo "BRANCH=${{ inputs.kernelsu_branch_other }}" >> "$GITHUB_ENV"
               else
-                  echo "❌ Error: Unsupported KernelSU branch selection: $KSU_BRANCH_RAW" >&2
-                  exit 1
+                echo "❌ Error: Custom branch not provided" >&2
+                exit 1
               fi
+            else
+              echo "❌ Unsupported KernelSU branch: $KSU_BRANCH_RAW" >&2
+              exit 1
+            fi
+          fi
 
    
       - name: Apply Baseband Guard
