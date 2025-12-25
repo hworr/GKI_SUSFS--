@@ -68,13 +68,15 @@ jobs:
           ccache --set-config=compression=true
           ccache --zero-stats
 
-      # Cache zuerst prüfen
-      - name: Restore kernel source cache
-        id: kernel-cache
+      - name: Restore Cache
         uses: actions/cache@v4
         with:
-          working-directory: ${{ env.KERNEL_ROOT }}
-          key: kernel-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
+          path: /home/runner/.ccache
+          key: ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
+          restore-keys: |
+            ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-
+            ccache-${{ inputs.android_version }}-
+            ccache-
       
       # Nur wenn Cache NICHT da ist → repo init + sync
       - name: Initialize and Sync Kernel Source
