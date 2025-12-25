@@ -67,16 +67,6 @@ jobs:
           ccache --max-size=10G
           ccache --set-config=compression=true
           ccache --zero-stats
-
-      - name: Restore Cache
-        uses: actions/cache@v4
-        with:
-          path: /home/runner/.ccache
-          key: ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
-          restore-keys: |
-            ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-
-            ccache-${{ inputs.android_version }}-
-            ccache-
       
       # Nur wenn Cache NICHT da ist → repo init + sync
       - name: Init & sync kernel repo
