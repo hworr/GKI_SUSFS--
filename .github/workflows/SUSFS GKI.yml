@@ -405,15 +405,15 @@ jobs:
       
           echo "==> Writing SUSFS config"
           cat >> "$DEFCONFIG" << 'EOF'
-      CONFIG_SUSFS=y
-      CONFIG_SUSFS_PROC=y
-      CONFIG_SUSFS_MAGIC_MOUNT=y
-      CONFIG_SUSFS_AUTO_BIND=y
-      CONFIG_SUSFS_SUS_PATH=y
-      EOF
-
-    echo "==> Verifying SUSFS"
-    grep '^CONFIG_SUSFS=y' "$DEFCONFIG"
+          CONFIG_SUSFS=y
+          CONFIG_SUSFS_PROC=y
+          CONFIG_SUSFS_MAGIC_MOUNT=y
+          CONFIG_SUSFS_AUTO_BIND=y
+          CONFIG_SUSFS_SUS_PATH=y
+          EOF
+    
+          echo "==> Verifying SUSFS"
+          grep '^CONFIG_SUSFS=y' "$DEFCONFIG"
 
 
       - name: Apply Module Check Bypass
