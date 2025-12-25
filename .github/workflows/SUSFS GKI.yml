@@ -542,181 +542,51 @@ jobs:
 
       - name: Add Configuration Settings
         run: |
-          echo "Changing to kernel root: $KERNEL_ROOT"
+        echo "Changing to kernel root: $KERNEL_ROOT"
           cd "$KERNEL_ROOT"
-
+    
+          DEFCONFIG=./common/arch/arm64/configs/gki_defconfig
+      
           echo "Adding configuration settings to gki_defconfig..."
+      
+          echo "CONFIG_KSU=y" >> "$DEFCONFIG"
+          echo "CONFIG_KSU_MANUAL_HOOK=y" >> "$DEFCONFIG"
+          echo "CONFIG_KSU_MANUAL_SU=n" >> "$DEFCONFIG"
 
-          # Add KSU configuration settings
-          echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/gki_defconfig
-          # echo "CONFIG_KPM=y" >> ./common/arch/arm64/configs/gki_defconfig
-
-          # echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./common/arch/arm64/configs/gki_defconfig
-          
-          echo "CONFIG_KSU_MANUAL_HOOK=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_MANUAL_SU=n" >> ./common/arch/arm64/configs/gki_defconfig
-
-          # Add SUSFS configuration settings
-          echo "CONFIG_KSU_SUSFS=n" >> ./common/arch/arm64/configs/gki_defconfig
-          # echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          # echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ./common/arch/arm64/configs/gki_defconfig
-          # echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          # echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          # echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          # echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          # echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n" >> ./common/arch/arm64/configs/gki_defconfig
-          # echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          # echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          # echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> ./common/arch/arm64/configs/gki_defconfig
-          # echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> ./common/arch/arm64/configs/gki_defconfig
-          # echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> ./common/arch/arm64/configs/gki_defconfig
-          # echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> ./common/arch/arm64/configs/gki_defconfig
-          # echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          
-
-          # Add additional tmpfs config setting
-          echo "CONFIG_TMPFS_XATTR=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_TMPFS_POSIX_ACL=y" >> ./common/arch/arm64/configs/gki_defconfig
-
-          # Add additional config setting
-          echo "CONFIG_IP_NF_TARGET_TTL=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP6_NF_TARGET_HL=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP6_NF_MATCH_HL=y" >> ./common/arch/arm64/configs/gki_defconfig
-
-          # Add BBR Config
-          echo "CONFIG_TCP_CONG_ADVANCED=y" >> ./common/arch/arm64/configs/gki_defconfig 
-          echo "CONFIG_TCP_CONG_BBR=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NET_SCH_FQ=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_TCP_CONG_BIC=n" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_TCP_CONG_WESTWOOD=n" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_TCP_CONG_HTCP=n" >> ./common/arch/arm64/configs/gki_defconfig 
-          echo "CONFIG_DEFAULT_BBR=y" >> ./common/arch/arm64/configs/gki_defconfig 
-
-          # Add optimized 
-          echo "CONFIG_BPF_STREAM_PARSER=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NETFILTER_XT_SET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_MAX=65534" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_BITMAP_IP=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_BITMAP_IPMAC=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_BITMAP_PORT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_IP=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_IPMARK=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_IPPORT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_IPPORTIP=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_IPPORTNET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_IPMAC=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_MAC=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_NETPORTNET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_NET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_NETNET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_NETPORT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_NETIFACE=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_LIST_SET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP6_NF_NAT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP6_NF_TARGET_MASQUERADE=y" >> ./common/arch/arm64/configs/gki_defconfig
-          
-          # Add NetHunter
-          # =========================
-          # Netfilter / NetHunter Core
-          # =========================
-          echo "CONFIG_NETFILTER=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NETFILTER_ADVANCED=y" >> ./common/arch/arm64/configs/gki_defconfig
-          
-          # =========================
-          # iptables / nftables
-          # =========================
-          echo "CONFIG_NETFILTER_XTABLES=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NETFILTER_XT_MARK=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NETFILTER_XT_TARGET_MARK=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NETFILTER_XT_TARGET_TCPMSS=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NETFILTER_XT_MATCH_CONNTRACK=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NETFILTER_XT_MATCH_STATE=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NETFILTER_XT_MATCH_MULTIPORT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NETFILTER_XT_MATCH_COMMENT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          
-          # =========================
-          # IPv4 Netfilter
-          # =========================
-          echo "CONFIG_NF_CONNTRACK=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NF_CONNTRACK_EVENTS=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NF_NAT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NF_NAT_IPV4=y" >> ./common/arch/arm64/configs/gki_defconfig
-          
-          echo "CONFIG_IP_NF_IPTABLES=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_NF_FILTER=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_NF_TARGET_REJECT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_NF_TARGET_MASQUERADE=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_NF_NAT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_NF_MANGLE=y" >> ./common/arch/arm64/configs/gki_defconfig
-          
-          # =========================
-          # IPv6 Netfilter (wichtig!)
-          # =========================
-          echo "CONFIG_NF_NAT_IPV6=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP6_NF_IPTABLES=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP6_NF_FILTER=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP6_NF_TARGET_REJECT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP6_NF_TARGET_MASQUERADE=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP6_NF_MANGLE=y" >> ./common/arch/arm64/configs/gki_defconfig
-          
-          # =========================
-          # Packet mangling / raw
-          # =========================
-          echo "CONFIG_NETFILTER_XT_TARGET_TPROXY=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NETFILTER_XT_MATCH_SOCKET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NETFILTER_XT_MATCH_POLICY=y" >> ./common/arch/arm64/configs/gki_defconfig
-          
-          # =========================
-          # TUN / Monitor / Injection
-          # =========================
-          echo "CONFIG_TUN=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_PACKET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_PACKET_DIAG=y" >> ./common/arch/arm64/configs/gki_defconfig
-          
-          # =========================
-          # Wireless injection support
-          # =========================
-          echo "CONFIG_CFG80211=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_CFG80211_WEXT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_MAC80211=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_MAC80211_MESH=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_MAC80211_LEDS=y" >> ./common/arch/arm64/configs/gki_defconfig
-          
-          # =========================
-          # USB WiFi adapters (RTL, MTK, Atheros)
-          # =========================
-          echo "CONFIG_USB_NET_RNDIS_HOST=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_USB_USBNET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_USB_NET_CDCETHER=y" >> ./common/arch/arm64/configs/gki_defconfig
-          
-          # =========================
-          # HID / USB keyboard injection
-          # =========================
-          echo "CONFIG_USB_HID=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_HIDRAW=y" >> ./common/arch/arm64/configs/gki_defconfig
-          
-          # =========================
-          # NetHunter / debugging helpers
-          # =========================
-          echo "CONFIG_NETFILTER_NETLINK=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NETFILTER_NETLINK_QUEUE=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NETFILTER_NETLINK_LOG=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_TMPFS_XATTR=y" >> "$DEFCONFIG"
+          echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$DEFCONFIG"
+      
+          echo "CONFIG_IP_NF_TARGET_TTL=y" >> "$DEFCONFIG"
+          echo "CONFIG_IP6_NF_TARGET_HL=y" >> "$DEFCONFIG"
+          echo "CONFIG_IP6_NF_MATCH_HL=y" >> "$DEFCONFIG"
+      
+          echo "CONFIG_TCP_CONG_ADVANCED=y" >> "$DEFCONFIG"
+          echo "CONFIG_TCP_CONG_BBR=y" >> "$DEFCONFIG"
+          echo "CONFIG_NET_SCH_FQ=y" >> "$DEFCONFIG"
+          echo "CONFIG_DEFAULT_BBR=y" >> "$DEFCONFIG"
+      
+          echo "CONFIG_NETFILTER=y" >> "$DEFCONFIG"
+          echo "CONFIG_NETFILTER_ADVANCED=y" >> "$DEFCONFIG"
+          echo "CONFIG_NETFILTER_XTABLES=y" >> "$DEFCONFIG"
+          echo "CONFIG_NETFILTER_XT_MATCH_CONNTRACK=y" >> "$DEFCONFIG"
+          echo "CONFIG_NETFILTER_XT_MATCH_MULTIPORT=y" >> "$DEFCONFIG"
+      
+          echo "CONFIG_CFG80211=y" >> "$DEFCONFIG"
+          echo "CONFIG_MAC80211=y" >> "$DEFCONFIG"
+      
+          echo "✓ Configuration step finished"
 
 
-          # Remove check_defconfig
-          sed -i '/name = "kernel_aarch64",/,/)/{
-          /module_outs = \[/!{
-          /)/i\
-              module_outs = [\
-                  "net/wireless/cfg80211.ko",\
-                  "net/mac80211/mac80211.ko",\
-                  "drivers/net/usb/rndis_host.ko",\
-              ],\
-          }
-          }' common/BUILD.bazel
+         sed -i '/name = "kernel_aarch64",/,/)/{
+            /module_outs = \[/!{
+            /)/i\
+                module_outs = [\
+                    "net/wireless/cfg80211.ko",\
+                    "net/mac80211/mac80211.ko",\
+                    "drivers/net/usb/rndis_host.ko",\
+                ],\
+            }
+            }' common/BUILD.bazel
 
       - name: Final KernelSU + SUSFS config
         working-directory: ${{ env.KERNEL_ROOT }}
