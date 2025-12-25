@@ -577,16 +577,16 @@ jobs:
           echo "✓ Configuration step finished"
 
 
-         sed -i '/name = "kernel_aarch64",/,/)/{
-            /module_outs = \[/!{
-            /)/i\
-                module_outs = [\
-                    "net/wireless/cfg80211.ko",\
-                    "net/mac80211/mac80211.ko",\
-                    "drivers/net/usb/rndis_host.ko",\
-                ],\
-            }
-            }' common/BUILD.bazel
+           sed -i '/name = "kernel_aarch64",/,/)/{
+              /module_outs = \[/!{
+              /)/i\
+                  module_outs = [\
+                      "net/wireless/cfg80211.ko",\
+                      "net/mac80211/mac80211.ko",\
+                      "drivers/net/usb/rndis_host.ko",\
+                  ],\
+              }
+              }' common/BUILD.bazel
 
       - name: Final KernelSU + SUSFS config
         working-directory: ${{ env.KERNEL_ROOT }}
