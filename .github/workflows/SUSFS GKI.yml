@@ -666,32 +666,27 @@ jobs:
       
           echo "✓ Kernel version branding applied"
 
-          # --------------------------------------------------
-          # Apply config fragments (GKI safe)
-          # --------------------------------------------------
-          - name: Apply SukiSU + SUSFS config fragment
-            run: |
-              set -e
-          
-              echo "Applying GKI-safe config fragments..."
-          
-              DEFCONFIG="common/arch/arm64/configs/gki_defconfig"
-          
-              if [ ! -f "$DEFCONFIG" ]; then
-                echo "❌ gki_defconfig not found"
-                exit 1
-              fi
-          
-              echo "Appending fragment: kernel/configs/sukisu_susfs.fragment"
-              cat kernel/configs/sukisu_susfs.fragment >> "$DEFCONFIG"
-          
-              echo "✓ Fragment applied"
-              echo "Last config lines:"
-              tail -n 20 "$DEFCONFIG"
+
+      - name: Apply SukiSU + SUSFS config fragment (GKI safe)
+        run: |
+          set -e
+      
+          echo "Applying GKI-safe config fragment..."
+      
+          DEFCONFIG="common/arch/arm64/configs/gki_defconfig"
+      
+          if [ ! -f "$DEFCONFIG" ]; then
+            echo "❌ gki_defconfig not found"
+            exit 1
+          fi
+      
+          echo "Appending fragment: kernel/configs/sukisu_susfs.fragment"
+          cat kernel/configs/sukisu_susfs.fragment >> "$DEFCONFIG"
+      
+          echo "✓ Fragment applied"
+          echo "Last lines:"
+          tail -n 20 "$DEFCONFIG"
      
-      # --------------------------------------------------
-      # Build Kernel
-      # --------------------------------------------------
       - name: Build Kernel
         run: |
           set -e
