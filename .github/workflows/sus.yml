@@ -77,7 +77,7 @@ jobs:
     - name: Repo init & sync (GKI)
       run: |
         set -e
-        BRANCH="android15-6.6-${{ inputs.os_patch_level }}"
+        BRANCH="android15-6.6"
         $REPO init -u https://android.googlesource.com/kernel/manifest -b common-$BRANCH
         $REPO sync -j$(nproc --all) --fail-fast
 
