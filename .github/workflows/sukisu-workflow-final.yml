@@ -127,7 +127,6 @@ jobs:
           set -e
           test -d common || { echo "common/ not found"; exit 1; }
           test -d .repo || { echo ".repo/ not found"; exit 1; }
-          test -f build/build.sh || { echo "build/build.sh not found"; exit 1; }
           echo "✓ Kernel workspace OK"
 
       # --------------------------------------------------
@@ -306,10 +305,26 @@ jobs:
           sed -i 's/PRE_DEFCONFIG_CMDS=.*/PRE_DEFCONFIG_CMDS=""/g' build.config.gki.aarch64 || true
           echo "✓ Validation disabled"
 
+      - name: Pre-sort defconfig for Bazel (CRITICAL)
+        working-directory: common
+        run: |
+          set -e
+          
+          echo "==> Pre-sorting defconfig to match Bazel's savedefconfig"
+          
+          # Generate sorted version that Bazel expects
+          make ARCH=arm64 gki_defconfig
+          make ARCH=arm64 savedefconfig
+          
+          # Replace with sorted version
+          cp defconfig arch/arm64/configs/gki_defconfig
+          
+          echo "✓ Defconfig pre-sorted"
+
       # --------------------------------------------------
       # BUILD
       # --------------------------------------------------
-      - name: Build kernel (build.sh only)
+      - name: Build kernel with Bazel
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 90
@@ -328,9 +343,8 @@ jobs:
             sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64 || true
             sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
 
-            LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 \
-              SKIP_DEFCONFIG_CHECK=1 \
-              build/build.sh CC="/usr/bin/ccache clang"
+            # Use Bazel (defconfig was pre-sorted!)
+            tools/bazel build --config=fast --config=stamp //common:kernel_aarch64_dist
 
       - name: Show ccache stats
         run: ccache --show-stats
@@ -341,13 +355,22 @@ jobs:
       - name: Package AnyKernel3
         run: |
           set -e
-          IMG=$(find out -name Image 2>/dev/null | head -1)
+          
+          # Bazel output
+          IMG=$(find bazel-bin -name Image 2>/dev/null | head -1)
+          
+          if [ ! -f "$IMG" ]; then
+            # Fallback to out/
+            IMG=$(find out -name Image 2>/dev/null | head -1)
+          fi
+          
           test -f "$IMG" || { echo "ERROR: Image not found"; exit 1; }
           
           echo "Using kernel image: $IMG"
           cp "$IMG" AnyKernel3/Image
           
           mkdir -p AnyKernel3/modules/vendor/lib/modules
+          find bazel-bin -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
           find out -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
           
           cd AnyKernel3
