@@ -139,6 +139,13 @@ jobs:
           
           echo "✓ Kernel repo workspace ready with build.sh"
 
+      - name: Repo init & sync (GKI)
+        run: |
+            set -e
+              BRANCH="android15-6.6-${{ inputs.os_patch_level }}"
+              $REPO init -u https://android.googlesource.com/kernel/manifest -b common-$BRANCH
+              $REPO sync -j$(nproc --all) --fail-fast 
+
       - name: Clone SUSFS and AnyKernel3
         run: |
           set -e
