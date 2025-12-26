@@ -182,31 +182,30 @@ jobs:
           
           echo "KernelSU allowlist completely removed"
 
-      - name: Apply SUSFS patch
-        working-directory: common
-        run: |
-          set -e
-          PATCH_DIR="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches"
-          if [ -f "$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch" ]; then
-            PATCH="$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch"
-          elif [ -f "$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch" ]; then
-            PATCH="$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch"
-          else
-            PATCH=$(find "$PATCH_DIR" -name "*6.6*.patch" | head -1)
-            if [ -z "$PATCH" ]; then
-              echo "No suitable SUSFS patch found"
-              ls -la "$PATCH_DIR"/*.patch 2>/dev/null || true
-              exit 0
-            fi
-          fi
-          echo "Applying SUSFS patch: $PATCH"
-          if patch -p1 < "$PATCH"; then
-            echo "Patch applied successfully"
-          else
-            echo "Some hunks failed, cleaning up rejects"
-            find . -name "*.rej" -delete 2>/dev/null || true
-          fi
-
+    #  - name: Apply SUSFS patch
+    #    working-directory: common
+    #    run: |
+    #      set -e
+    #      PATCH_DIR="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches"
+    #      if [ -f "$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch" ]; then
+    #        PATCH="$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch"
+    #      elif [ -f "$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch" ]; then
+    #        PATCH="$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch"
+    #      else
+    #        PATCH=$(find "$PATCH_DIR" -name "*6.6*.patch" | head -1)
+    #        if [ -z "$PATCH" ]; then
+    #          echo "No suitable SUSFS patch found"
+    #          ls -la "$PATCH_DIR"/*.patch 2>/dev/null || true
+    #          exit 0
+    #        fi
+    #      fi
+    #      echo "Applying SUSFS patch: $PATCH"
+    #      if patch -p1 < "$PATCH"; then
+    #        echo "Patch applied successfully"
+    #      else
+    #        echo "Some hunks failed, cleaning up rejects"
+    #        find . -name "*.rej" -delete 2>/dev/null || true
+    #      fi
       - name: Copy SUSFS files
         run: |
           set -e
@@ -372,10 +371,14 @@ jobs:
             sed -i 's/BUILD_KSELFTESTS=.*/BUILD_KSELFTESTS=0/' common/build.config.gki.aarch64 || true
             sed -i 's/BUILD_GKI_CERTIFICATION_TOOLS=.*/BUILD_GKI_CERTIFICATION_TOOLS=0/' common/build.config.gki.aarch64 || true
             
-            tools/bazel build \
-              $BAZEL_OPTS \
-              --config=fast \
-              --config=stamp \
-              --action_env=CC="$CC" \
+                tools/bazel build \
+                  $BAZEL_OPTS \
+                  --config=fast \
+                  --config=stamp \repo init \
+                  -u https://android.googlesource.com/kernel/manifest \
+                  -b common-${BRANCH} \
+                  --partial-clone \
+                  --clone-filter=blob:none
+                              --action_env=CC="$CC" \
               --action_env=HOSTCC="$HOSTCC" \
               //common:kernel_aarch64_dist
