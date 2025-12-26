@@ -153,23 +153,23 @@ jobs:
         mkdir -p common/fs/susfs
 
         cat > common/fs/susfs/Makefile << 'EOF'
-obj-$(CONFIG_SUSFS) += susfs.o
-susfs-y := sus_su.o
-EOF
+        obj-$(CONFIG_SUSFS) += susfs.o
+        susfs-y := sus_su.o
+        EOF
 
-        cat > common/fs/susfs/Kconfig << 'EOF'
-config SUSFS
-    bool "SUSFS support"
-    depends on KSU
-    default y
-EOF
+                cat > common/fs/susfs/Kconfig << 'EOF'
+        config SUSFS
+            bool "SUSFS support"
+            depends on KSU
+            default y
+        EOF
 
-        cat > common/fs/susfs/sus_su.c << 'EOF'
-#include <linux/module.h>
-#include <linux/susfs.h>
-bool susfs_is_current_proc_umounted(void) { return false; }
-EXPORT_SYMBOL(susfs_is_current_proc_umounted);
-EOF
+                cat > common/fs/susfs/sus_su.c << 'EOF'
+        #include <linux/module.h>
+        #include <linux/susfs.h>
+        bool susfs_is_current_proc_umounted(void) { return false; }
+        EXPORT_SYMBOL(susfs_is_current_proc_umounted);
+        EOF
 
         grep -q 'fs/susfs' common/fs/Kconfig || \
           echo 'source "fs/susfs/Kconfig"' >> common/fs/Kconfig
@@ -183,60 +183,54 @@ EOF
     # DEFCONFIG
     # --------------------------------------------------
     - name: Patch gki_defconfig
-      working-directory: common
-      run: |
-        DEF=arch/arm64/configs/gki_defconfig
-        sed -i '/^CONFIG_KSU/d;/^CONFIG_SUSFS/d' "$DEF"
-
+        working-directory: common
+        run: |
+          DEF=arch/arm64/configs/gki_defconfig
+          sed -i '/^CONFIG_KSU/d;/^CONFIG_SUSFS/d' "$DEF"
+                    
         cat >> "$DEF" << 'EOF'
-CONFIG_KSU=y
-CONFIG_KSU_MANUAL_HOOK=y
-CONFIG_KSU_KPROBES_HOOK=n
-CONFIG_SUSFS=y
-CONFIG_KSU_SUSFS=y
-CONFIG_CFG80211=m
-CONFIG_MAC80211=m
-CONFIG_USB_GADGET=y
-CONFIG_USB_CONFIGFS=y
-CONFIG_TMPFS_XATTR=y
-CONFIG_TMPFS_POSIX_ACL=y
-CONFIG_TCP_CONG_BBR=y
-CONFIG_NET_SCH_FQ=y
-CONFIG_DEFAULT_BBR=y
-EOF
-
-    # --------------------------------------------------
-    # BUILD (BAZEL ONLY)
-    # --------------------------------------------------
-    - name: Build kernel with Bazel
-      uses: nick-fields/retry@v3
-      with:
-        timeout_minutes: 90
-        max_attempts: 2
-        retry_on: timeout
-        command: |
-          ( while sleep 300; do echo "[keepalive] $(date)"; done ) &
-          KEEPALIVE_PID=$!
-          trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
-
-          sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
-          sed -i '/MODULES_ORDER/d;/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
-
-          tools/bazel build --config=fast --config=stamp //common:kernel_aarch64_dist
-
-    # --------------------------------------------------
-    # PACKAGE
-    # --------------------------------------------------
-    - name: Package AnyKernel3
-      run: |
-        IMG=$(find bazel-bin -name Image | head -1)
-        test -f "$IMG"
-        cp "$IMG" AnyKernel3/Image
-        cd AnyKernel3
-        zip -r ../kernel.zip .
-
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: nethunter-kernel
-        path: kernel.zip
+        CONFIG_KSU=y
+        CONFIG_KSU_MANUAL_HOOK=y
+        ONFIG_KSU_KPROBES_HOOK=n
+        CONFIG_SUSFS=y
+        CONFIG_KSU_SUSFS=y
+        CONFIG_CFG80211=m
+        CONFIG_MAC80211=m
+        CONFIG_USB_GADGET=y
+        CONFIG_USB_CONFIGFS=y
+        CONFIG_TMPFS_XATTR=y
+        CONFIG_TMPFS_POSIX_ACL=y
+         CONFIG_TCP_CONG_BBR=y
+         CONFIG_NET_SCH_FQ=y
+         ONFIG_DEFAULT_BBR=y
+         EOF
+         
+         - name: Build kernel with Bazel
+          uses: nick-fields/retry@v3
+          with:
+            timeout_minutes: 90
+            max_attempts: 2
+            retry_on: timeout
+            command: |
+              ( while sleep 300; do echo "[keepalive] $(date)"; done ) &
+              KEEPALIVE_PID=$!
+              trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
+    
+              sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
+              sed -i '/MODULES_ORDER/d;/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
+    
+              tools/bazel build --config=fast --config=stamp //common:kernel_aarch64_dist
+              
+              - name: Package AnyKernel3
+              run: |
+                IMG=$(find bazel-bin -name Image | head -1)
+                test -f "$IMG"
+                cp "$IMG" AnyKernel3/Image
+                cd AnyKernel3
+                zip -r ../kernel.zip .
+        
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              with:
+                name: nethunter-kernel
+                path: kernel.zip
