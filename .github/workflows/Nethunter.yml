@@ -76,25 +76,40 @@ jobs:
     - name: Add SukiSU
       run: |
         curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh \
-          | bash -s ${{ inputs.kernelsu_branch }}
+          | bash -s "${{ inputs.kernelsu_branch }}"
 
-    - name: Apply SUSFS
+    - name: Apply SUSFS patch (safe)
       working-directory: common
       run: |
-        patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch
-        cp ../susfs4ksu/kernel_patches/fs/* fs/
-        cp ../susfs4ksu/kernel_patches/include/linux/* include/linux/
+        set -e
+
+        PATCH_DIR="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches"
+        PATCH="$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch"
+
+        if [ ! -f "$PATCH" ]; then
+          echo "❌ SUSFS patch not found"
+          ls -la "$PATCH_DIR" || true
+          exit 1
+        fi
+
+        echo "✓ Applying $PATCH"
+        patch -p1 < "$PATCH"
+
+        echo "✓ Copying SUSFS files"
+        cp -r "$PATCH_DIR/fs/"* fs/
+        cp -r "$PATCH_DIR/include/linux/"* include/linux/
 
     # --------------------------------------------------
-    # DEFCONFIG (SINGLE SOURCE)
+    # DEFCONFIG
     # --------------------------------------------------
     - name: Patch gki_defconfig
       working-directory: common
       run: |
         DEF=arch/arm64/configs/gki_defconfig
-        sed -i '/CONFIG_KSU/d;/CONFIG_SUSFS/d' $DEF
 
-        cat >> $DEF << 'EOF'
+        sed -i '/CONFIG_KSU/d;/CONFIG_SUSFS/d' "$DEF"
+
+        cat >> "$DEF" << 'EOF'
         CONFIG_KSU=y
         CONFIG_KSU_MANUAL_HOOK=y
         CONFIG_SUSFS=y
@@ -108,38 +123,32 @@ jobs:
         EOF
 
     # --------------------------------------------------
-    # BUILD (ONLY build.sh)
+    # BUILD (build.sh ONLY)
     # --------------------------------------------------
-    - name: Build kernel (build.sh ONLY)
+    - name: Build kernel
       run: |
-       set -e
+        set -e
 
-       sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
-       - name: Build kernel (build.sh ONLY)
-         run: |
-           set -e
+        sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
+        sed -i '/MODULES_ORDER/d' common/build.config.gki.aarch64 || true
+        sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
 
-       sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
-       sed -i '/MODULES_ORDER/d' common/build.config.gki.aarch64 || true
-       sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
- 
-       export SKIP_DEFCONFIG_CHECK=1
-       export BUILD_BAZEL=0
+        export SKIP_DEFCONFIG_CHECK=1
+        export BUILD_BAZEL=0
 
-       build/build.sh CC="/usr/bin/ccache clang"sed -i '/MODULES_ORDER/d' common/build.config.gki.aarch64 || true
-       sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
+        build/build.sh CC="/usr/bin/ccache clang"
 
-       export SKIP_DEFCONFIG_CHECK=1
-       export BUILD_BAZEL=0
-
-       build/build.sh CC="/usr/bin/ccache clang"
+    # --------------------------------------------------
+    # PACKAGE
+    # --------------------------------------------------
     - name: Package AnyKernel3
       run: |
         IMG=$(find out -name Image | head -1)
         cp "$IMG" AnyKernel3/Image
-        cd AnyKernel3 && zip -r ../kernel.zip .
+        cd AnyKernel3
+        zip -r ../kernel.zip .
 
     - uses: actions/upload-artifact@v4
       with:
-         name: kernel
-         path: kernel.zip
+        name: kernel
+        path: kernel.zip
