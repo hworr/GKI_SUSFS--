@@ -80,7 +80,7 @@ jobs:
         curl -o "$HOME/bin/repo" https://storage.googleapis.com/git-repo-downloads/repo
         chmod +x "$HOME/bin/repo"
 
-        BRANCH="android${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
+        BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
 
         "$HOME/bin/repo" init \
           -u https://android.googlesource.com/kernel/manifest \
