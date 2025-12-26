@@ -1,4 +1,4 @@
-name: Nethunter Kernel Build (GKI Fixed)
+name: SukiSU Kernel Build (GKI Fixed)
 
 permissions:
   contents: write
@@ -157,6 +157,26 @@ jobs:
           
           git clone https://github.com/MiRinChan/AnyKernel3.git
 
+      - name: Pre-add SUSFS config markers
+        run: |
+          set -e
+          DEFCONFIG="common/arch/arm64/configs/gki_defconfig"
+          
+          echo "==> Pre-configuring SUSFS markers (so KernelSU detects it)"
+          
+          # Remove any existing KSU/SUSFS config
+          sed -i '/^CONFIG_KSU/d' "$DEFCONFIG" 2>/dev/null || true
+          sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG" 2>/dev/null || true
+          
+          # Add minimal SUSFS markers
+          cat >> "$DEFCONFIG" << 'EOF'
+          CONFIG_SUSFS=y
+          CONFIG_KSU_SUSFS=y
+          EOF
+          
+          echo "✓ SUSFS markers added"
+          grep -E "CONFIG_(KSU_)?SUSFS" "$DEFCONFIG" || true
+
       - name: Determine KernelSU branch
         run: |
           if [[ "${{ env.KERNELSU_VARIANT }}" == "SukiSU" ]]; then
@@ -167,7 +187,7 @@ jobs:
             fi
           fi
 
-      - name: Add SukiSU (FIRST - before SUSFS)
+      - name: Add SukiSU (will now detect SUSFS)
         if: env.KERNELSU_VARIANT == 'SukiSU'
         run: |
           curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
@@ -187,7 +207,7 @@ jobs:
             PATCH=$(find "$PATCH_DIR" -name "*6.6*.patch" | head -1)
             if [ -z "$PATCH" ]; then
               echo "⚠️ No suitable SUSFS patch found"
-              ls -la "$PATCH_DIR"/*.patch 2>/dev/null || echo "No patches found"
+              ls -la "$PATCH_DIR"/*.patch 2>/dev/null || true
               exit 0
             fi
           fi
@@ -200,7 +220,7 @@ jobs:
             find . -name "*.rej" -delete 2>/dev/null || true
           fi
 
-      - name: Copy SUSFS files (AFTER KernelSU)
+      - name: Copy SUSFS files
         run: |
           set -e
           echo "==> Copying SUSFS files"
@@ -211,7 +231,7 @@ jobs:
             cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/ 2>/dev/null || true
           fi
 
-      - name: Setup SUSFS build files (AFTER KernelSU)
+      - name: Setup SUSFS build files
         run: |
           mkdir -p common/fs/susfs
           python3 - << 'PYCODE'
@@ -245,7 +265,7 @@ jobs:
           print("✓ SUSFS build files ready")
           PYCODE
 
-      - name: Create SUSFS stub if needed (AFTER KernelSU)
+      - name: Create SUSFS stub if needed
         run: |
           python3 - << 'PYCODE'
           import os
@@ -348,6 +368,12 @@ jobs:
           rm -rf security/baseband-guard || true
           sed -i '/baseband_guard/d' security/Kconfig || true
 
+      - name: Clean tree BEFORE config
+        working-directory: common
+        run: |
+          make mrproper || true
+          echo "✓ Tree cleaned (before config generation)"
+
       - name: Create config fragment
         run: |
           cat > /tmp/gki_nethunter.config << 'EOF'
@@ -403,7 +429,7 @@ jobs:
           CONFIG_IP_SET_LIST_SET=y
           EOF
           
-          echo "✓ Created NetHunter config fragment"
+          echo "✓ Created NetHunter config"
 
       - name: Build config (WITHOUT savedefconfig)
         working-directory: common
@@ -415,16 +441,16 @@ jobs:
           ./scripts/kconfig/merge_config.sh -m .config /tmp/gki_nethunter.config
           
           if grep -q "CONFIG_SUSFS=y" .config; then
-            echo "✓ SUSFS enabled in .config"
+            echo "✓ SUSFS enabled"
           else
-            echo "⚠️ SUSFS not found, forcing it"
+            echo "⚠️ Forcing SUSFS"
             echo "CONFIG_SUSFS=y" >> .config
             echo "CONFIG_KSU_SUSFS=y" >> .config
           fi
           
-          echo "✓ Config merged (skipping savedefconfig)"
+          echo "✓ Config ready (no savedefconfig)"
 
-      - name: Disable defconfig validation completely
+      - name: Disable defconfig validation
         working-directory: common
         run: |
           set -e
@@ -440,13 +466,7 @@ jobs:
             sed -i 's/"check_defconfig": True/"check_defconfig": False/g' build/kernel/kleaf/impl/kernel_config.bzl || true
           fi
           
-          echo "✓ Defconfig validation completely disabled"
-
-      - name: Clean tree
-        working-directory: common
-        run: |
-          make mrproper || true
-          echo "✓ Tree cleaned, ready to build"
+          echo "✓ Validation disabled"
 
       - name: Build kernel
         uses: nick-fields/retry@v3
@@ -485,7 +505,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nethunter-kernel
+          name: sukisu-kernel
           path: kernel.zip
 
       - name: Save repo cache
