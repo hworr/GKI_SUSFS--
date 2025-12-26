@@ -78,6 +78,14 @@ jobs:
         BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
         $REPO init -u https://android.googlesource.com/kernel/manifest -b common-$BRANCH
         $REPO sync -j$(nproc --all) --fail-fast
+
+    - name: Clean kernel source tree (GKI requirement)
+      working-directory: common
+      run: |
+        set -e
+        echo "==> Running make mrproper to satisfy GKI/Kleaf"
+        make mrproper
+        echo "✓ Kernel source tree cleaned"
     # --------------------------------------------------
     # EXTERNAL PATCHES
     # --------------------------------------------------
