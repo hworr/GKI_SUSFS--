@@ -450,6 +450,8 @@ jobs:
           
           echo "✓ Config ready (no savedefconfig)"
 
+         
+
       - name: Disable defconfig validation
         working-directory: common
         run: |
@@ -478,6 +480,9 @@ jobs:
             ( while sleep 300; do echo "[keepalive] $(date)"; done ) &
             KEEPALIVE_PID=$!
             trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
+
+            # Clean the tree first
+            cd common && make mrproper && cd ..
             
             sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
             sed -i '/MODULES_ORDER/d' common/build.config.gki.aarch64 || true
