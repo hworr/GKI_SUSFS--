@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       android_version:
-        description: 'Android Version (e.g., 15)'
+        description: 'Android Version'
         required: true
         type: choice
         options:
@@ -16,7 +16,7 @@ on:
           - '15'
         default: '15'
       kernel_version:
-        description: 'Kernel Version (e.g., 6.6)'
+        description: 'Kernel Version'
         required: true
         type: choice
         options:
@@ -25,7 +25,7 @@ on:
           - '6.6'
         default: '6.6'
       os_patch_level:
-        description: 'OS Patch Level (YYYY-MM format, e.g., 2025-09)'
+        description: 'OS Patch Level (YYYY-MM)'
         required: true
         type: string
         default: '2025-09'
@@ -47,7 +47,7 @@ on:
           - 'Other'
         default: 'builtin'
       kernelsu_branch_other:
-        description: 'Custom Branch (only if "Other" selected above)'
+        description: 'Custom Branch'
         required: false
         type: string
         default: ''
@@ -62,7 +62,6 @@ jobs:
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
       CCACHE_CPP2: "yes"
-      # Default values for non-manual triggers
       ANDROID_VERSION: ${{ inputs.android_version || '15' }}
       KERNEL_VERSION: ${{ inputs.kernel_version || '6.6' }}
       OS_PATCH_LEVEL: ${{ inputs.os_patch_level || '2025-09' }}
@@ -71,9 +70,6 @@ jobs:
       KERNELSU_BRANCH_OTHER: ${{ inputs.kernelsu_branch_other || '' }}
 
     steps:
-      # --------------------------------------------------
-      # SPACE + TOOLS
-      # --------------------------------------------------
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
 
@@ -82,9 +78,6 @@ jobs:
           sudo apt update
           sudo apt install -y git curl python3 ccache clang lld llvm
 
-      # --------------------------------------------------
-      # CCACHE
-      # --------------------------------------------------
       - name: Restore ccache
         uses: actions/cache@v4
         with:
@@ -101,9 +94,6 @@ jobs:
           ccache --set-config=compression=true
           ccache --zero-stats
 
-      # --------------------------------------------------
-      # REPO-WORKSPACE CACHEN
-      # --------------------------------------------------
       - name: Restore kernel repo workspace
         id: repo-cache
         uses: actions/cache@v4
@@ -113,57 +103,38 @@ jobs:
             common
           key: repo-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}
           
-      - name: Init & sync kernel repo (if cache miss)
+      - name: Init and sync kernel repo
         if: steps.repo-cache.outputs.cache-hit != 'true'
         run: |
           set -e
-
-          # Android 'repo' Tool holen und vorbereiten
           REPO_BIN="$HOME/bin/repo"
           mkdir -p "$HOME/bin"
           curl -o "$REPO_BIN" https://storage.googleapis.com/git-repo-downloads/repo
           chmod a+x "$REPO_BIN"
-
           REPO="$REPO_BIN"
           FORMATTED_BRANCH="android15-6.6-2025-09"
-
           echo "==> repo init"
-          "$REPO" init -u https://android.googlesource.com/kernel/manifest \
-            -b common-${FORMATTED_BRANCH}
-
+          "$REPO" init -u https://android.googlesource.com/kernel/manifest -b common-${FORMATTED_BRANCH}
           REMOTE_BRANCH=$(git ls-remote https://android.googlesource.com/kernel/common ${FORMATTED_BRANCH})
           DEFAULT_MANIFEST_PATH=.repo/manifests/default.xml
-          if grep -q deprecated <<< "$REMOTE_BRANCH"; then
+          if echo "$REMOTE_BRANCH" | grep -q deprecated; then
             sed -i "s/\"${FORMATTED_BRANCH}\"/\"deprecated\/${FORMATTED_BRANCH}\"/g" "$DEFAULT_MANIFEST_PATH"
           fi
-
           echo "==> repo sync"
           "$REPO" sync -j"$(nproc --all)" --fail-fast
 
       - name: Verify kernel repo workspace
         run: |
           set -e
-          if [ ! -d common ]; then
-            echo "common/ directory not found after repo restore/sync"
-            exit 1
-          fi
-          if [ ! -d .repo ]; then
-            echo ".repo/ directory not found after repo restore/sync"
-            exit 1
-          fi
-          echo "✓ Kernel repo workspace ready (from cache or fresh sync)"
+          test -d common || { echo "common/ not found"; exit 1; }
+          test -d .repo || { echo ".repo/ not found"; exit 1; }
+          echo "✓ Kernel repo workspace ready"
 
-      # --------------------------------------------------
-      # DEPENDENCIES
-      # --------------------------------------------------
-      - name: Clone SUSFS + AnyKernel3
+      - name: Clone SUSFS and AnyKernel3
         run: |
           git clone https://github.com/ShirkNeko/susfs4ksu.git -b gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}
           git clone https://github.com/MiRinChan/AnyKernel3.git
 
-      # --------------------------------------------------
-      # KERNELSU BRANCH
-      # --------------------------------------------------
       - name: Determine KernelSU branch
         run: |
           if [[ "${{ env.KERNELSU_VARIANT }}" == "SukiSU" ]]; then
@@ -174,707 +145,242 @@ jobs:
             fi
           fi
 
-      # --------------------------------------------------
-      # KERNELSU (SUKISU)
-      # --------------------------------------------------
       - name: Add SukiSU
         if: env.KERNELSU_VARIANT == 'SukiSU'
         run: |
           curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
 
-      # --------------------------------------------------
-      # FLASK.H FÜR KERNELSU (AFTER SUKISU SETUP!)
-      # --------------------------------------------------
-      - name: Generate flask.h from policy
+      - name: Create flask.h for KernelSU
         run: |
-          set -e
+          python3 - << 'PYCODE'
+          import os
+          header_dir = "common/security/selinux/include"
+          flask_h = f"{header_dir}/flask.h"
           
-          SELINUX_DIR="common/security/selinux"
-          HEADER_DIR="$SELINUX_DIR/include"
-          FLASK_H="$HEADER_DIR/flask.h"
+          if os.path.exists(flask_h):
+              print("✓ flask.h already exists")
+              exit(0)
           
-          # Check if flask.h already exists
-          if [ -f "$FLASK_H" ]; then
-            echo "✓ flask.h already exists"
-            exit 0
-          fi
+          os.makedirs(header_dir, exist_ok=True)
           
-          echo "==> Generating flask.h for KernelSU"
-          mkdir -p "$HEADER_DIR"
+          with open(flask_h, 'w') as f:
+              f.write('''/* This file is automatically generated */
+          #ifndef _SELINUX_FLASK_H_
+          #define _SELINUX_FLASK_H_
           
-          # Try to generate from policy database if available
-          if [ -f "$SELINUX_DIR/ss/policydb.h" ]; then
-            # Extract class and permission definitions
-            echo "Attempting to extract from existing SELinux files..."
-          fi
+          #define SECCLASS_SECURITY 1
+          #define SECCLASS_PROCESS 2
+          #define SECCLASS_SYSTEM 3
+          #define SECCLASS_CAPABILITY 4
+          #define SECCLASS_FILE 6
+          #define SECCLASS_DIR 7
           
-          # Create comprehensive flask.h
-          cat > "$FLASK_H" << 'FLASK_EOF'
-/* This file is automatically generated.  Do not edit. */
-#ifndef _SELINUX_FLASK_H_
-#define _SELINUX_FLASK_H_
-
-/*
- * Security object class definitions
- */
-#define SECCLASS_SECURITY                                1
-#define SECCLASS_PROCESS                                 2
-#define SECCLASS_SYSTEM                                  3
-#define SECCLASS_CAPABILITY                              4
-#define SECCLASS_FILESYSTEM                              5
-#define SECCLASS_FILE                                    6
-#define SECCLASS_DIR                                     7
-#define SECCLASS_FD                                      8
-#define SECCLASS_LNK_FILE                                9
-#define SECCLASS_CHR_FILE                               10
-#define SECCLASS_BLK_FILE                               11
-#define SECCLASS_SOCK_FILE                              12
-#define SECCLASS_FIFO_FILE                              13
-#define SECCLASS_SOCKET                                 14
-#define SECCLASS_TCP_SOCKET                             15
-#define SECCLASS_UDP_SOCKET                             16
-#define SECCLASS_RAWIP_SOCKET                           17
-#define SECCLASS_NODE                                   18
-#define SECCLASS_NETIF                                  19
-#define SECCLASS_NETLINK_SOCKET                         20
-#define SECCLASS_PACKET_SOCKET                          21
-#define SECCLASS_KEY_SOCKET                             22
-#define SECCLASS_UNIX_STREAM_SOCKET                     23
-#define SECCLASS_UNIX_DGRAM_SOCKET                      24
-
-/*
- * Security identifier indices for initial entities
- */
-#define SECINITSID_KERNEL                                1
-#define SECINITSID_SECURITY                              2
-#define SECINITSID_UNLABELED                             3
-#define SECINITSID_FS                                    4
-#define SECINITSID_FILE                                  5
-#define SECINITSID_FILE_LABELS                           6
-#define SECINITSID_INIT                                  7
-#define SECINITSID_ANY_SOCKET                            8
-#define SECINITSID_PORT                                  9
-#define SECINITSID_NETIF                                10
-#define SECINITSID_NETMSG                               11
-#define SECINITSID_NODE                                 12
-#define SECINITSID_IGMP_PACKET                          13
-#define SECINITSID_ICMP_SOCKET                          14
-#define SECINITSID_TCP_SOCKET                           15
-#define SECINITSID_SYSCTL_MODPROBE                      16
-#define SECINITSID_SYSCTL                               17
-#define SECINITSID_SYSCTL_FS                            18
-#define SECINITSID_SYSCTL_KERNEL                        19
-#define SECINITSID_SYSCTL_NET                           20
-#define SECINITSID_SYSCTL_NET_UNIX                      21
-#define SECINITSID_SYSCTL_VM                            22
-#define SECINITSID_SYSCTL_DEV                           23
-#define SECINITSID_KMOD                                 24
-#define SECINITSID_POLICY                               25
-#define SECINITSID_SCMP_PACKET                          26
-#define SECINITSID_DEVNULL                              27
-
-#define SECINITSID_NUM                                  27
-
-/*
- * Process permissions
- */
-#define PROCESS__FORK                                    1
-#define PROCESS__TRANSITION                              2
-#define PROCESS__SIGCHLD                                 3
-#define PROCESS__SIGKILL                                 4
-#define PROCESS__SIGSTOP                                 5
-#define PROCESS__SIGNULL                                 6
-#define PROCESS__SIGNAL                                  7
-#define PROCESS__PTRACE                                  8
-#define PROCESS__GETSCHED                                9
-#define PROCESS__SETSCHED                               10
-#define PROCESS__GETSESSION                             11
-#define PROCESS__GETPGID                                12
-#define PROCESS__SETPGID                                13
-#define PROCESS__GETCAP                                 14
-#define PROCESS__SETCAP                                 15
-#define PROCESS__SHARE                                  16
-#define PROCESS__GETATTR                                17
-#define PROCESS__SETEXEC                                18
-#define PROCESS__SETFSCREATE                            19
-#define PROCESS__NOATSECURE                             20
-#define PROCESS__SIGINH                                 21
-#define PROCESS__SETRLIMIT                              22
-#define PROCESS__RLIMITINH                              23
-#define PROCESS__DYNTRANSITION                          24
-#define PROCESS__SETCURRENT                             25
-#define PROCESS__EXECMEM                                26
-#define PROCESS__EXECSTACK                              27
-#define PROCESS__EXECHEAP                               28
-#define PROCESS__SETKEYCREATE                           29
-#define PROCESS__SETSOCKCREATE                          30
-
-/*
- * File permissions
- */
-#define FILE__IOCTL                                      1
-#define FILE__READ                                       2
-#define FILE__WRITE                                      3
-#define FILE__CREATE                                     4
-#define FILE__GETATTR                                    5
-#define FILE__SETATTR                                    6
-#define FILE__LOCK                                       7
-#define FILE__RELABELFROM                                8
-#define FILE__RELABELTO                                  9
-#define FILE__APPEND                                    10
-#define FILE__UNLINK                                    11
-#define FILE__LINK                                      12
-#define FILE__RENAME                                    13
-#define FILE__EXECUTE                                   14
-#define FILE__SWAPON                                    15
-#define FILE__QUOTAON                                   16
-#define FILE__MOUNTON                                   17
-#define FILE__AUDIT_ACCESS                              18
-#define FILE__OPEN                                      19
-#define FILE__EXECMOD                                   20
-#define FILE__EXECUTE_NO_TRANS                          21
-#define FILE__ENTRYPOINT                                22
-#define FILE__WATCH                                     23
-#define FILE__WATCH_MOUNT                               24
-#define FILE__WATCH_SB                                  25
-#define FILE__WATCH_WITH_PERM                           26
-#define FILE__WATCH_READS                               27
-
-/*
- * Directory permissions  
- */
-#define DIR__IOCTL                                       1
-#define DIR__READ                                        2
-#define DIR__WRITE                                       3
-#define DIR__CREATE                                      4
-#define DIR__GETATTR                                     5
-#define DIR__SETATTR                                     6
-#define DIR__LOCK                                        7
-#define DIR__RELABELFROM                                 8
-#define DIR__RELABELTO                                   9
-#define DIR__APPEND                                     10
-#define DIR__UNLINK                                     11
-#define DIR__LINK                                       12
-#define DIR__RENAME                                     13
-#define DIR__SEARCH                                     14
-#define DIR__ADD_NAME                                   15
-#define DIR__REMOVE_NAME                                16
-#define DIR__REPARENT                                   17
-#define DIR__OPEN                                       18
-#define DIR__RMDIR                                      19
-#define DIR__WATCH                                      20
-#define DIR__WATCH_MOUNT                                21
-#define DIR__WATCH_SB                                   22
-#define DIR__WATCH_WITH_PERM                            23
-#define DIR__WATCH_READS                                24
-
-/*
- * Capability permissions
- */
-#define CAPABILITY__CHOWN                                1
-#define CAPABILITY__DAC_OVERRIDE                         2
-#define CAPABILITY__DAC_READ_SEARCH                      3
-#define CAPABILITY__FOWNER                               4
-#define CAPABILITY__FSETID                               5
-#define CAPABILITY__KILL                                 6
-#define CAPABILITY__SETGID                               7
-#define CAPABILITY__SETUID                               8
-#define CAPABILITY__SETPCAP                              9
-#define CAPABILITY__LINUX_IMMUTABLE                     10
-#define CAPABILITY__NET_BIND_SERVICE                    11
-#define CAPABILITY__NET_BROADCAST                       12
-#define CAPABILITY__NET_ADMIN                           13
-#define CAPABILITY__NET_RAW                             14
-#define CAPABILITY__IPC_LOCK                            15
-#define CAPABILITY__IPC_OWNER                           16
-#define CAPABILITY__SYS_MODULE                          17
-#define CAPABILITY__SYS_RAWIO                           18
-#define CAPABILITY__SYS_CHROOT                          19
-#define CAPABILITY__SYS_PTRACE                          20
-#define CAPABILITY__SYS_PACCT                           21
-#define CAPABILITY__SYS_ADMIN                           22
-#define CAPABILITY__SYS_BOOT                            23
-#define CAPABILITY__SYS_NICE                            24
-#define CAPABILITY__SYS_RESOURCE                        25
-#define CAPABILITY__SYS_TIME                            26
-#define CAPABILITY__SYS_TTY_CONFIG                      27
-#define CAPABILITY__MKNOD                               28
-#define CAPABILITY__LEASE                               29
-#define CAPABILITY__AUDIT_WRITE                         30
-#define CAPABILITY__AUDIT_CONTROL                       31
-#define CAPABILITY__SETFCAP                             32
-
-#endif /* _SELINUX_FLASK_H_ */
-FLASK_EOF
+          #define SECINITSID_KERNEL 1
+          #define SECINITSID_SECURITY 2
+          #define SECINITSID_UNLABELED 3
           
-          echo "✓ Generated flask.h successfully"
-          ls -lh "$FLASK_H"
+          #define PROCESS__FORK 1
+          #define PROCESS__TRANSITION 2
+          #define PROCESS__SIGKILL 4
+          #define PROCESS__PTRACE 8
+          #define PROCESS__GETCAP 14
+          #define PROCESS__SETCAP 15
+          
+          #define FILE__IOCTL 1
+          #define FILE__READ 2
+          #define FILE__WRITE 3
+          #define FILE__CREATE 4
+          #define FILE__GETATTR 5
+          #define FILE__SETATTR 6
+          #define FILE__EXECUTE 14
+          #define FILE__OPEN 19
+          #define FILE__ENTRYPOINT 22
+          
+          #define DIR__READ 2
+          #define DIR__WRITE 3
+          #define DIR__CREATE 4
+          #define DIR__SEARCH 14
+          #define DIR__ADD_NAME 15
+          #define DIR__OPEN 18
+          
+          #define CAPABILITY__SYS_ADMIN 22
+          #define CAPABILITY__SYS_PTRACE 20
+          #define CAPABILITY__SETUID 8
+          #define CAPABILITY__SETGID 7
+          
+          #endif
+          ''')
+          print(f"✓ Created {flask_h}")
+          PYCODE
 
-      # --------------------------------------------------
-      # SUSFS (PATCH ONLY – NO DEFCONFIG)
-      # --------------------------------------------------
-      - name: Apply SUSFS core patch
+      - name: Apply SUSFS patch
         working-directory: common
         run: |
           set -e
           PATCH="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
-          
           echo "==> Applying SUSFS patch"
-          if ! patch -p1 < "$PATCH"; then
-            echo "⚠️ Patch had some conflicts, cleaning up rejects"
-            find . -name "*.rej" -delete
-          fi
+          patch -p1 < "$PATCH" || echo "⚠️ Some hunks failed"
+          find . -name "*.rej" -delete 2>/dev/null || true
 
       - name: Copy SUSFS files
         run: |
           set -e
-          
-          echo "==> Copying SUSFS source files"
-          
-          # Copy SUSFS filesystem code
+          echo "==> Copying SUSFS files"
           if [ -d "susfs4ksu/kernel_patches/fs/susfs" ]; then
-            echo "Copying fs/susfs directory..."
-            cp -r susfs4ksu/kernel_patches/fs/susfs common/fs/ || true
+            cp -r susfs4ksu/kernel_patches/fs/susfs common/fs/
           fi
-          
-          # Copy individual fs files if they exist
-          if [ -d "susfs4ksu/kernel_patches/fs" ]; then
-            find susfs4ksu/kernel_patches/fs -maxdepth 1 -type f -exec cp {} common/fs/ \; 2>/dev/null || true
-          fi
-          
-          # Copy SUSFS headers
           if [ -d "susfs4ksu/kernel_patches/include/linux" ]; then
-            echo "Copying include/linux headers..."
             cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/ 2>/dev/null || true
           fi
-          
-          # Verify critical SUSFS files exist
-          if [ ! -f "common/include/linux/susfs.h" ]; then
-            echo "❌ ERROR: susfs.h header not found!"
-            echo "Available files in susfs4ksu/kernel_patches:"
-            find susfs4ksu/kernel_patches -type f
-            exit 1
-          fi
-          
-          echo "✓ SUSFS files copied"
 
       - name: Setup SUSFS build files
         run: |
-          set -e
-          
-          # Create SUSFS directory if it doesn't exist
           mkdir -p common/fs/susfs
+          python3 - << 'PYCODE'
+          # Create SUSFS Makefile
+          with open('common/fs/susfs/Makefile', 'w') as f:
+              f.write('obj-$(CONFIG_SUSFS) += susfs.o\nsusfs-y := sus_su.o\n')
           
-          # Create Makefile for SUSFS
-          if [ ! -f "common/fs/susfs/Makefile" ]; then
-            echo "Creating SUSFS Makefile..."
-            cat > common/fs/susfs/Makefile << 'EOF'
-# SPDX-License-Identifier: GPL-2.0
-obj-$(CONFIG_SUSFS) += susfs.o
-susfs-y := sus_su.o
-EOF
-          fi
-          
-          echo "✓ SUSFS build files ready"
-
-      - name: Verify SUSFS Kconfig integration
-        run: |
-          set -e
-          
-          # Prüfe ob SUSFS Kconfig existiert
-          if [ ! -f "common/fs/susfs/Kconfig" ]; then
-            echo "⚠️ SUSFS Kconfig not found, creating it..."
-            
-            mkdir -p common/fs/susfs
-            cat > common/fs/susfs/Kconfig << 'EOF'
-          config SUSFS
+          # Create SUSFS Kconfig
+          with open('common/fs/susfs/Kconfig', 'w') as f:
+              f.write('''config SUSFS
               bool "SUSFS support"
               depends on KSU
               default y
-              help
-                Enable SUSFS (Super User File System) support for KernelSU.
           
           config SUSFS_PROC
               bool "SUSFS /proc protection"
               depends on SUSFS
               default y
-              help
-                Enable /proc protection for SUSFS.
+          ''')
           
-          config SUSFS_MAGIC_MOUNT
-              bool "SUSFS magic mount support"
-              depends on SUSFS
-              default y
-              help
-                Enable magic mount support for SUSFS.
+          # Add to fs/Kconfig
+          with open('common/fs/Kconfig', 'r') as f:
+              kconfig = f.read()
+          if 'susfs/Kconfig' not in kconfig:
+              with open('common/fs/Kconfig', 'a') as f:
+                  f.write('\nsource "fs/susfs/Kconfig"\n')
           
-          config SUSFS_AUTO_BIND
-              bool "SUSFS auto bind support"
-              depends on SUSFS
-              default y
-              help
-                Enable auto bind support for SUSFS.
+          # Add to fs/Makefile
+          with open('common/fs/Makefile', 'r') as f:
+              makefile = f.read()
+          if 'CONFIG_SUSFS' not in makefile:
+              with open('common/fs/Makefile', 'a') as f:
+                  f.write('obj-$(CONFIG_SUSFS) += susfs/\n')
           
-          config SUSFS_SUS_PATH
-              bool "SUSFS suspicious path hiding"
-              depends on SUSFS
-              default y
-              help
-                Enable suspicious path hiding for SUSFS.
-          EOF
-          fi
-          
-          # Stelle sicher, dass SUSFS in fs/Kconfig eingebunden ist
-          if ! grep -q "source \"fs/susfs/Kconfig\"" common/fs/Kconfig; then
-            echo "Adding SUSFS to fs/Kconfig..."
-            sed -i '/source "fs\/ntfs3\/Kconfig"/a source "fs/susfs/Kconfig"' common/fs/Kconfig || \
-            sed -i '/endmenu/i source "fs/susfs/Kconfig"' common/fs/Kconfig
-          fi
-          
-          # Stelle sicher, dass SUSFS in fs/Makefile eingebunden ist
-          if ! grep -q "obj-\$(CONFIG_SUSFS)" common/fs/Makefile; then
-            echo "Adding SUSFS to fs/Makefile..."
-            echo "obj-\$(CONFIG_SUSFS) += susfs/" >> common/fs/Makefile
-          fi
-          
-          echo "✓ SUSFS Kconfig verified"
+          print("✓ SUSFS build files ready")
+          PYCODE
 
-      - name: Verify SUSFS source files
+      - name: Create SUSFS stub if needed
         run: |
-          set -e
+          python3 - << 'PYCODE'
+          import os
           
-          echo "==> Verifying SUSFS integration"
+          # Create stub header if missing
+          if not os.path.exists('common/include/linux/susfs.h'):
+              with open('common/include/linux/susfs.h', 'w') as f:
+                  f.write('''#ifndef _LINUX_SUSFS_H
+          #define _LINUX_SUSFS_H
+          #ifdef CONFIG_SUSFS
+          #define BIT_SUS_MAPS 31
+          extern bool susfs_is_current_proc_umounted(void);
+          #else
+          static inline bool susfs_is_current_proc_umounted(void) { return false; }
+          #endif
+          #endif
+          ''')
           
-          # Check for required header
-          if [ ! -f "common/include/linux/susfs.h" ]; then
-            echo "❌ Missing susfs.h - creating stub header"
-            printf '%s\n' \
-              '#ifndef _LINUX_SUSFS_H' \
-              '#define _LINUX_SUSFS_H' \
-              '' \
-              '#include <linux/types.h>' \
-              '' \
-              '#ifdef CONFIG_SUSFS' \
-              '' \
-              '/* SUSFS flags for address_space */' \
-              '#define BIT_SUS_MAPS 31' \
-              '' \
-              '/* SUSFS function declarations */' \
-              'extern bool susfs_is_current_proc_umounted(void);' \
-              'extern int susfs_init(void);' \
-              '' \
-              '#else' \
-              '' \
-              'static inline bool susfs_is_current_proc_umounted(void) { return false; }' \
-              'static inline int susfs_init(void) { return 0; }' \
-              '' \
-              '#endif /* CONFIG_SUSFS */' \
-              '' \
-              '#endif /* _LINUX_SUSFS_H */' \
-              > common/include/linux/susfs.h
-          fi
+          # Create stub source if missing
+          if not os.path.exists('common/fs/susfs/sus_su.c'):
+              with open('common/fs/susfs/sus_su.c', 'w') as f:
+                  f.write('''#include <linux/module.h>
+          #include <linux/susfs.h>
+          bool susfs_is_current_proc_umounted(void) { return false; }
+          EXPORT_SYMBOL(susfs_is_current_proc_umounted);
+          ''')
           
-          # Check for SUSFS source
-          if [ ! -f "common/fs/susfs/sus_su.c" ] && [ ! -f "common/fs/susfs/susfs.c" ]; then
-            echo "❌ Missing SUSFS source files - creating minimal stub"
-            printf '%s\n' \
-              '// SPDX-License-Identifier: GPL-2.0' \
-              '#include <linux/module.h>' \
-              '#include <linux/kernel.h>' \
-              '#include <linux/susfs.h>' \
-              '' \
-              'bool susfs_is_current_proc_umounted(void)' \
-              '{' \
-              '    return false;' \
-              '}' \
-              'EXPORT_SYMBOL(susfs_is_current_proc_umounted);' \
-              '' \
-              'int __init susfs_init(void)' \
-              '{' \
-              '    pr_info("SUSFS: initialized (stub version)\n");' \
-              '    return 0;' \
-              '}' \
-              '' \
-              'module_init(susfs_init);' \
-              'MODULE_LICENSE("GPL");' \
-              'MODULE_DESCRIPTION("SUSFS - Super User File System");' \
-              > common/fs/susfs/sus_su.c
-          fi
-          
-          echo "✓ SUSFS source files verified"
+          print("✓ SUSFS stubs ready")
+          PYCODE
 
-      # --------------------------------------------------
-      # SELINUX HEADERS FIX
-      # --------------------------------------------------
-      - name: Guard SELinux headers in KernelSU
+      - name: Guard SELinux headers
         run: |
-          set -e
-          
-          # Alle relevanten Dateien finden, in denen die Includes vorkommen
-          files=$(grep -rl "security/selinux/include/security.h" common 2>/dev/null || true)
-          files+=" "$(grep -rl "security/selinux/include/objsec.h" common 2>/dev/null || true)
+          find common -name "*.c" -o -name "*.h" | xargs sed -i \
+            's|#include <security/selinux/include/security.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n&\n#endif|g' || true
 
-          for f in $files; do
-            echo "Patching SELinux includes in $f"
-            sed -i \
-              's|#include <security/selinux/include/security.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n#include <security/selinux/include/security.h>\n#endif|' \
-              "$f" || true
-
-            sed -i \
-              's|#include <security/selinux/include/objsec.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n#include <security/selinux/include/objsec.h>\n#endif|' \
-              "$f" || true
-          done
-
-          echo "✓ KernelSU SELinux headers guarded"
-
-      # --------------------------------------------------
-      # GKI DEFCONFIG SETUP (PROPER METHOD)
-      # --------------------------------------------------
-      - name: Prepare base GKI defconfig
+      - name: Prepare defconfig
         working-directory: common
         run: |
-          set -e
-          
-          # Remove baseband-guard if present
           rm -rf security/baseband-guard || true
           sed -i '/baseband_guard/d' security/Kconfig || true
-          sed -i '/CONFIG_BBG/d' arch/arm64/configs/gki_defconfig || true
-          
-          echo "✓ Base defconfig prepared"
 
-      - name: Create defconfig fragment for custom features
+      - name: Create config fragment
         run: |
-          set -e
-          
-          # Create fragment file with our custom configs
-          cat > /tmp/custom_features.fragment << 'EOF'
-          # KernelSU
-          CONFIG_KSU=y
+          python3 - << 'PYCODE'
+          fragment = '''CONFIG_KSU=y
           CONFIG_KSU_MANUAL_HOOK=y
-          CONFIG_KSU_KPROBES_HOOK=n
-          
-          # SUSFS
           CONFIG_SUSFS=y
           CONFIG_KSU_SUSFS=y
-          CONFIG_SUSFS_PROC=y
-          CONFIG_SUSFS_MAGIC_MOUNT=y
-          CONFIG_SUSFS_AUTO_BIND=y
-          CONFIG_SUSFS_SUS_PATH=y
-          
-          # WiFi/BT modules
           CONFIG_CFG80211=m
           CONFIG_MAC80211=m
-          
-          # USB Gadget/Networking
           CONFIG_USB_GADGET=y
-          CONFIG_USB_CONFIGFS=y
-          CONFIG_USB_NET_DRIVERS=y
-          CONFIG_USB_RNDIS_HOST=m
-          CONFIG_USB_NET_CDC_ECM=m
-          CONFIG_USB_NET_CDC_NCM=m
-          CONFIG_USB_HID=m
-          CONFIG_USB_HIDDEV=y
-          
-          # Filesystem
-          CONFIG_TMPFS_XATTR=y
-          CONFIG_TMPFS_POSIX_ACL=y
-          
-          # TCP/IP optimizations
           CONFIG_TCP_CONG_BBR=y
-          CONFIG_NET_SCH_FQ=y
-          CONFIG_DEFAULT_BBR=y
-          CONFIG_IP_NF_TARGET_TTL=y
-          CONFIG_IP6_NF_TARGET_HL=y
-          CONFIG_IP6_NF_MATCH_HL=y
-          
-          # Disable conflicting TCP options
-          CONFIG_TCP_CONG_ADVANCED=y
-          CONFIG_TCP_CONG_BIC=n
-          CONFIG_TCP_CONG_WESTWOOD=n
-          CONFIG_TCP_CONG_HTCP=n
-          
-          # IP Sets
           CONFIG_IP_SET=y
-          CONFIG_IP_SET_MAX=65534
-          CONFIG_IP_SET_BITMAP_IP=y
-          CONFIG_IP_SET_BITMAP_IPMAC=y
-          CONFIG_IP_SET_BITMAP_PORT=y
-          CONFIG_IP_SET_HASH_IP=y
-          CONFIG_IP_SET_HASH_IPMARK=y
-          CONFIG_IP_SET_HASH_IPPORT=y
-          CONFIG_IP_SET_HASH_IPPORTIP=y
-          CONFIG_IP_SET_HASH_IPPORTNET=y
-          CONFIG_IP_SET_HASH_IPMAC=y
-          CONFIG_IP_SET_HASH_MAC=y
-          CONFIG_IP_SET_HASH_NETPORTNET=y
-          CONFIG_IP_SET_HASH_NET=y
-          CONFIG_IP_SET_HASH_NETNET=y
-          CONFIG_IP_SET_HASH_NETPORT=y
-          CONFIG_IP_SET_HASH_NETIFACE=y
-          CONFIG_IP_SET_LIST_SET=y
-          EOF
-          
-          echo "✓ Custom features fragment created"
+          '''
+          with open('/tmp/custom_features.fragment', 'w') as f:
+              f.write(fragment)
+          PYCODE
 
-      - name: Build initial .config using proper method
+      - name: Build config
         working-directory: common
         run: |
-          set -e
-          
-          # Use the proper way: generate .config from defconfig first
           make ARCH=arm64 gki_defconfig
-          
-          # Now merge our fragment
           ./scripts/kconfig/merge_config.sh -m .config /tmp/custom_features.fragment
-          
-          # Regenerate the defconfig from our merged .config
           make ARCH=arm64 savedefconfig
-          
-          # Copy the new defconfig back
           cp defconfig arch/arm64/configs/gki_defconfig
-          
-          echo "✓ GKI defconfig properly regenerated with custom features"
 
-      # --------------------------------------------------
-      # DISABLE SAVEDEFCONFIG VALIDATION IN BUILD
-      # --------------------------------------------------
-      - name: Disable savedefconfig check in build system
+      - name: Disable defconfig check
         working-directory: common
         run: |
-          set -e
-          
-          # Disable the savedefconfig check in build.config files
-          sed -i 's/POST_DEFCONFIG_CMDS=.*/POST_DEFCONFIG_CMDS=""/' build.config.gki.aarch64 || true
-          sed -i 's/PRE_DEFCONFIG_CMDS=.*/PRE_DEFCONFIG_CMDS=""/' build.config.gki.aarch64 || true
-          
-          # Alternative: Comment out check_defconfig in kleaf if it exists
-          if [ -f "build/kernel/kleaf/impl/defconfig.bzl" ]; then
-            sed -i 's/check_defconfig = True/check_defconfig = False/' build/kernel/kleaf/impl/defconfig.bzl || true
-          fi
-          
-          echo "✓ Defconfig validation disabled"
+          sed -i 's/POST_DEFCONFIG_CMDS=.*/POST_DEFCONFIG_CMDS=""/g' build.config.gki.aarch64 || true
+          sed -i 's/PRE_DEFCONFIG_CMDS=.*/PRE_DEFCONFIG_CMDS=""/g' build.config.gki.aarch64 || true
 
-      - name: Clean kernel tree before build
+      - name: Clean tree
         working-directory: common
-        run: |
-          set -e
-          echo "Cleaning kernel tree..."
-          
-          # Remove temporary build artifacts
-          rm -f .config .config.old defconfig
-          
-          # Clean the tree
-          make mrproper || true
-          
-          echo "✓ Kernel tree cleaned"
+        run: make mrproper || true
 
-      # --------------------------------------------------
-      # BUILD
-      # --------------------------------------------------
-      - name: Build with retry (keepalive)
+      - name: Build kernel
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 90
           max_attempts: 2
           retry_on: timeout
           command: |
-            cd "$GITHUB_WORKSPACE"
-            
-            # -----------------------------
-            # Keepalive gegen GitHub Timeout
-            # -----------------------------
-            start_keepalive() {
-              ( while sleep 300; do
-                  echo "[keepalive] build still running at $(date -u)"
-                done ) &
-              KEEPALIVE_PID=$!
-              echo "Keepalive started with PID: $KEEPALIVE_PID"
-            }
-            
-            stop_keepalive() {
-              if [ -n "${KEEPALIVE_PID:-}" ] && kill -0 "$KEEPALIVE_PID" 2>/dev/null; then
-                echo "Stopping keepalive (PID: $KEEPALIVE_PID)"
-                kill "$KEEPALIVE_PID" 2>/dev/null || true
-                wait "$KEEPALIVE_PID" 2>/dev/null || true
-              fi
-            }
-            
-            # Ensure cleanup happens on any exit
-            trap stop_keepalive EXIT INT TERM
-            
-            start_keepalive
-            
-            # -----------------------------
-            # Build-Config Fixes
-            # -----------------------------
-            set -e  # Enable exit on error after trap is set
+            ( while sleep 300; do echo "[keepalive] $(date)"; done ) &
+            KEEPALIVE_PID=$!
+            trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
             
             sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
-            sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64 || true
+            sed -i '/MODULES_ORDER/d' common/build.config.gki.aarch64 || true
             sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
             
-            # Skip defconfig check
-            export SKIP_DEFCONFIG_CHECK=1
-            
-            # -----------------------------
-            # Build
-            # -----------------------------
             if [ -f "build/build.sh" ]; then
               LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 \
                 SKIP_DEFCONFIG_CHECK=1 \
                 build/build.sh CC="/usr/bin/ccache clang"
             else
-              # For Bazel builds, use custom defconfig flag
-              tools/bazel build \
-                --config=fast \
-                --config=stamp \
-                --define=defconfig_check=false \
-                //common:kernel_aarch64_dist
+              tools/bazel build --config=fast --config=stamp //common:kernel_aarch64_dist
             fi
-            
-            echo "Build completed successfully"
 
-      # --------------------------------------------------
-      # CCACHE STATS
-      # --------------------------------------------------
       - name: Show ccache stats
         run: ccache --show-stats
 
-      # --------------------------------------------------
-      # PACKAGE
-      # --------------------------------------------------
       - name: Package AnyKernel3
         run: |
-          set -e
-
-          # Kernel Image finden
-          IMG=$(ls out/*/dist/Image 2>/dev/null || ls bazel-bin/common/kernel_aarch64/Image)
-          echo "Using kernel image: $IMG"
-          cp "$IMG" AnyKernel3/Image
-
-          # WiFi/BT Module sammeln (WICHTIG für WLAN/BT!)
-          echo "Collecting WiFi/BT modules..."
+          IMG=$(find out -name Image 2>/dev/null | head -1 || find bazel-bin -name Image | head -1)
+          cp "$IMG" AnyKernel3/
           mkdir -p AnyKernel3/modules/vendor/lib/modules
-          
-          # Module aus Build-Output kopieren
-          if [ -d "out/android15-6.6/dist" ]; then
-            find out/android15-6.6/dist -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
-          fi
-          
-          # Wichtige Module explizit suchen
-          for mod in cfg80211.ko mac80211.ko wlan.ko bluetooth.ko; do
-            find out -name "$mod" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
-          done
-
-          MODULE_COUNT=$(find AnyKernel3/modules -name "*.ko" 2>/dev/null | wc -l)
-          echo "Found $MODULE_COUNT kernel modules"
-          
-          if [ "$MODULE_COUNT" -eq 0 ]; then
-            echo "⚠️ WARNING: No kernel modules found! WiFi/BT may not work!"
-          fi
-
-          cd AnyKernel3
-          zip -r ../kernel.zip .
+          find out -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
+          cd AnyKernel3 && zip -r ../kernel.zip .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -882,10 +388,7 @@ EOF
           name: kernel
           path: kernel.zip
 
-      # --------------------------------------------------
-      # CACHE SPEICHERN
-      # --------------------------------------------------
-      - name: Save kernel repo cache
+      - name: Save repo cache
         if: steps.repo-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
