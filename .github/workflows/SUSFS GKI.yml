@@ -1,4 +1,4 @@
-name: SukiSU Kernel Build (GKI Fixed)
+name: SukiSU Kernel Build (ABSOLUTE FINAL)
 
 permissions:
   contents: write
@@ -389,25 +389,6 @@ jobs:
           
           echo "✓ Created KernelSU + SUSFS config"
 
-      - name: Build config (WITHOUT savedefconfig)
-        working-directory: common
-        run: |
-          set -e
-          echo "==> Building config WITHOUT savedefconfig"
-          
-          make ARCH=arm64 gki_defconfig
-          ./scripts/kconfig/merge_config.sh -m .config /tmp/kernelsu_susfs.config
-          
-          if grep -q "CONFIG_SUSFS=y" .config; then
-            echo "✓ SUSFS enabled in .config"
-          else
-            echo "⚠️ Forcing SUSFS in .config"
-            echo "CONFIG_SUSFS=y" >> .config
-            echo "CONFIG_KSU_SUSFS=y" >> .config
-          fi
-          
-          echo "✓ Config ready (savedefconfig skipped)"
-
       - name: Disable defconfig validation completely
         working-directory: common
         run: |
@@ -437,7 +418,14 @@ jobs:
             KEEPALIVE_PID=$!
             trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
             
+            # Clean tree first
             cd common && make mrproper && cd ..
+            
+            # Regenerate config AFTER mrproper (CRITICAL!)
+            cd common
+            make ARCH=arm64 gki_defconfig
+            ./scripts/kconfig/merge_config.sh -m .config /tmp/kernelsu_susfs.config
+            cd ..
             
             sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
             sed -i '/MODULES_ORDER/d' common/build.config.gki.aarch64 || true
@@ -448,7 +436,12 @@ jobs:
                 SKIP_DEFCONFIG_CHECK=1 \
                 build/build.sh CC="/usr/bin/ccache clang"
             else
-              tools/bazel build --config=fast --config=stamp //common:kernel_aarch64_dist
+              tools/bazel build \
+                --config=fast \
+                --config=stamp \
+                --action_env=SKIP_DEFCONFIG_CHECK=1 \
+                --define=skip_defconfig_check=true \
+                //common:kernel_aarch64_dist
             fi
 
       - name: Show ccache stats
