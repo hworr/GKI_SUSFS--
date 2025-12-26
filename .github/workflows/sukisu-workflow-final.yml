@@ -73,7 +73,7 @@ jobs:
       - name: Set GKI branch
         run: |
           set -e
-          BRANCH="android${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}"
+          BRANCH="${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}"
           echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
           echo "Using branch: common-$BRANCH"
 
