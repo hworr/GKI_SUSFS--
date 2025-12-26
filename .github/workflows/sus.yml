@@ -1,4 +1,4 @@
-name: SukiSU Kernel Build (GKI Fixed)
+name: sus Kernel Build (GKI Fixed)
 
 permissions:
   contents: write
