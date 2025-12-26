@@ -184,6 +184,23 @@ jobs:
           rm -rf security/baseband-guard || true
           sed -i '/baseband_guard/d' security/Kconfig || true
           echo "✓ Defconfig prepared"
+          
+      - name: HARD remove KernelSU allowlist (GKI REQUIRED)
+        run: |
+          cd common
+            
+                echo ">>> Removing KernelSU allowlist sources (GKI-safe)"
+            
+                rm -f drivers/kernelsu/allowlist.c
+                rm -f drivers/kernelsu/app_profile.c
+            
+                # Sicherheitscheck
+                if ls drivers/kernelsu | grep -q allowlist; then
+                  echo "❌ allowlist still present"
+                  exit 1
+                fi
+            
+                echo "✓ KernelSU allowlist completely removed" 
 
       - name: Disable KernelSU allowlist (GKI-safe)
         run: |
