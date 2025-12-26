@@ -389,26 +389,22 @@ jobs:
           
           echo "✓ Created KernelSU + SUSFS config"
 
-      - name: Disable defconfig validation completely
-        working-directory: common
+      - name: Disable defconfig validation (GKI safe)
         run: |
-          set -e
-          
-          sed -i 's/POST_DEFCONFIG_CMDS=.*/POST_DEFCONFIG_CMDS=""/g' build.config.gki.aarch64 || true
-          sed -i 's/PRE_DEFCONFIG_CMDS=.*/PRE_DEFCONFIG_CMDS=""/g' build.config.gki.aarch64 || true
-          
+         set -e
+      
+          sed -i 's/POST_DEFCONFIG_CMDS=.*/POST_DEFCONFIG_CMDS=""/g' common/build.config.gki.aarch64 || true
+          sed -i 's/PRE_DEFCONFIG_CMDS=.*/PRE_DEFCONFIG_CMDS=""/g' common/build.config.gki.aarch64 || true
+      
           if [ -f "build/kernel/kleaf/impl/defconfig.bzl" ]; then
             sed -i 's/check_defconfig = True/check_defconfig = False/g' build/kernel/kleaf/impl/defconfig.bzl || true
           fi
-          
+      
           if [ -f "build/kernel/kleaf/impl/kernel_config.bzl" ]; then
             sed -i 's/"check_defconfig": True/"check_defconfig": False/g' build/kernel/kleaf/impl/kernel_config.bzl || true
           fi
-          
-          echo "✓ Defconfig validation completely disabled"
-
-            # Clean tree first
-            cd common && make mrproper && cd ..
+      
+          echo "✓ Defconfig validation disabled (GKI-safe)"
 
       - name: Configure KernelSU + SUSFS
         working-directory: ${{ env.KERNEL_ROOT }}
