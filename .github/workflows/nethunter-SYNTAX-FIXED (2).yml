@@ -259,7 +259,15 @@ jobs:
           EOF
           echo "Defconfig patched"
 
+          export BAZEL_OPTS="
+          --jobs=2
+          --local_ram_resources=6144
+          --local_cpu_resources=2
+          --spawn_strategy=local
+          --noexperimental_remote_execution
+          --noremote_cache
       - name: Disable defconfig validation
+
         working-directory: common
         run: |
           sed -i 's/POST_DEFCONFIG_CMDS=.*/POST_DEFCONFIG_CMDS=""/g' build.config.gki.aarch64 || true
@@ -281,75 +289,85 @@ jobs:
         run: |
           make mrproper
           echo "Kernel tree cleaned"
+          export USE_GKI_PREBUILTS=true
+          export BUILD_USE_PREBUILT_CLANG=true
+          export HERMETIC_TOOLCHAIN=1
+              - name: Build kernel with Bazel
+                uses: nick-fields/retry@v3
+                with:
+                  timeout_minutes: 90 
+                  export USE_GKI_PREBUILTS=true
+          export BUILD_USE_PREBUILT_CLANG=true
+          export HERMETIC_TOOLCHAIN=1
+                  max_attempts: 2
+                  retry_on: timeout
+                  command: |
+                    cd "$GITHUB_WORKSPACE"
+                    ( while sleep 300; do echo "[keepalive] $(date -u)"; done ) &
+                    KEEPALIVE_PID=$!
+                    trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
+                    sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
+                    sed -i '/MODULES_ORDER/d' common/build.config.gki.aarch64 || true
+                    sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
+                    tools/bazel build --config=fast --config=stamp //common:kernel_aarch64_dist
+                    repo init \
+                    -u https://android.googlesource.com/kernel/manifest \
+                    -b common-${BRANCH} \
+                    --partial-clone \
+                    --clone-filter=blob:none
 
-      - name: Build kernel with Bazel
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 90
-          max_attempts: 2
-          retry_on: timeout
-          command: |
-            cd "$GITHUB_WORKSPACE"
-            ( while sleep 300; do echo "[keepalive] $(date -u)"; done ) &
-            KEEPALIVE_PID=$!
-            trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
-            sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
-            sed -i '/MODULES_ORDER/d' common/build.config.gki.aarch64 || true
-            sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
-            tools/bazel build --config=fast --config=stamp //common:kernel_aarch64_dist
-
-      - name: Show ccache stats
-        run: ccache --show-stats
-
-      - name: Package AnyKernel3
-        run: |
-          set -e
-          IMG=$(find bazel-bin -name Image 2>/dev/null | head -1)
-          if [ ! -f "$IMG" ]; then
-            IMG=$(find out -name Image 2>/dev/null | head -1)
-          fi
-          test -f "$IMG" || { echo "ERROR: Image not found"; exit 1; }
-          echo "Using: $IMG"
-          cp "$IMG" AnyKernel3/Image
-          mkdir -p AnyKernel3/modules/vendor/lib/modules
-          find bazel-bin out -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
-          cd AnyKernel3
-          zip -r ../nethunter-kernel.zip .
-          echo "Packaged"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: nethunter-kernel
-          path: nethunter-kernel.zip
-
-      - name: Save ccache
-        uses: actions/cache/save@v4
-        with:
-          path: /home/runner/.ccache
-          key: ccache-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}-${{ github.run_id }}
-          
-              export BAZEL_OPTS="
-              --jobs=2
-              --local_ram_resources=6144
-              --local_cpu_resources=2
-              --spawn_strategy=local
-              "
-              
-              export CC="/usr/bin/ccache clang"
-              export HOSTCC="/usr/bin/ccache clang"
-              export LTO=thin
-              
-              sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
-              sed -i '/MODULES_ORDER/d' common/build.config.gki.aarch64 || true
-              sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
-              sed -i 's/BUILD_KSELFTESTS=.*/BUILD_KSELFTESTS=0/' common/build.config.gki.aarch64 || true
-              sed -i 's/BUILD_GKI_CERTIFICATION_TOOLS=.*/BUILD_GKI_CERTIFICATION_TOOLS=0/' common/build.config.gki.aarch64 || true
-              
-              tools/bazel build \
-                $BAZEL_OPTS \
-                --config=fast \
-                --config=stamp \
-                --action_env=CC="$CC" \
-                --action_env=HOSTCC="$HOSTCC" \
-                //common:kernel_aarch64_dist
+              - name: Show ccache stats
+                run: ccache --show-stats
+        
+              - name: Package AnyKernel3
+                run: |
+                  set -e
+                  IMG=$(find bazel-bin -name Image 2>/dev/null | head -1)
+                  if [ ! -f "$IMG" ]; then
+                    IMG=$(find out -name Image 2>/dev/null | head -1)
+                  fi
+                  test -f "$IMG" || { echo "ERROR: Image not found"; exit 1; }
+                  echo "Using: $IMG"
+                  cp "$IMG" AnyKernel3/Image
+                  mkdir -p AnyKernel3/modules/vendor/lib/modules
+                  find bazel-bin out -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
+                  cd AnyKernel3
+                  zip -r ../nethunter-kernel.zip .
+                  echo "Packaged"
+        
+              - name: Upload artifact
+                uses: actions/upload-artifact@v4
+                with:
+                  name: nethunter-kernel
+                  path: nethunter-kernel.zip
+        
+              - name: Save ccache
+                uses: actions/cache/save@v4
+                with:
+                  path: /home/runner/.ccache
+                  key: ccache-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}-${{ github.run_id }}
+                  
+                      export BAZEL_OPTS="
+                      --jobs=2
+                      --local_ram_resources=6144
+                      --local_cpu_resources=2
+                      --spawn_strategy=local
+                      "
+                      
+                      export CC="/usr/bin/ccache clang"
+                      export HOSTCC="/usr/bin/ccache clang"
+                      export LTO=thin
+                      
+                      sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
+                      sed -i '/MODULES_ORDER/d' common/build.config.gki.aarch64 || true
+                      sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
+                      sed -i 's/BUILD_KSELFTESTS=.*/BUILD_KSELFTESTS=0/' common/build.config.gki.aarch64 || true
+                      sed -i 's/BUILD_GKI_CERTIFICATION_TOOLS=.*/BUILD_GKI_CERTIFICATION_TOOLS=0/' common/build.config.gki.aarch64 || true
+                      
+                      tools/bazel build \
+                        $BAZEL_OPTS \
+                        --config=fast \
+                        --config=stamp \
+                        --action_env=CC="$CC" \
+                        --action_env=HOSTCC="$HOSTCC" \
+                        //common:kernel_aarch64_dist
