@@ -1,4 +1,4 @@
-name: Nethunter Kernel Build (SukiSU + SUSFS + NetHunter)
+name: Nethunter Kernel Build (SukiSU + SUSFS)
 
 permissions:
   contents: write
@@ -9,22 +9,14 @@ on:
     inputs:
       android_version:
         required: true
-        type: string
         default: android15
       kernel_version:
         required: true
-        type: string
         default: 6.6
       os_patch_level:
         required: true
-        type: string
-      kernelsu_variant:
-        required: true
-        type: string
-        default: SukiSU
       kernelsu_branch:
         required: true
-        type: string
         default: builtin
 
 jobs:
@@ -33,541 +25,106 @@ jobs:
 
     env:
       CCACHE_DIR: /home/runner/.ccache
-      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
-      CCACHE_NOHASHDIR: "true"
-      CCACHE_HARDLINK: "true"
 
     steps:
     # --------------------------------------------------
-    # SPACE + TOOLS
+    # TOOLS
     # --------------------------------------------------
     - uses: easimon/maximize-build-space@master
-      with:
-        root-reserve-mb: 8192
-        swap-size-mb: 8192
-        remove-dotnet: "true"
-        remove-android: "true"
-        remove-haskell: "true"
-        remove-codeql: "true"
 
-    - name: Install dependencies
+    - name: Install deps
       run: |
         sudo apt update
-        sudo apt install -y git curl ccache python3 build-essential bc flex bison libssl-dev
+        sudo apt install -y git curl ccache clang lld llvm bc bison flex libssl-dev
+
     - name: Setup ccache
       run: |
-        ccache --max-size=3G
+        ccache --max-size=5G
         ccache --set-config=compression=true
-    - uses: actions/cache@v4
-      with:
-        path: ~/.ccache
-        key: ccache-${{ github.sha }}
-        restore-keys: ccache-
 
     # --------------------------------------------------
     # REPO
     # --------------------------------------------------
-    - name: Install repo tool
+    - name: Install repo
       run: |
-        mkdir -p git-repo
-        curl -s https://storage.googleapis.com/git-repo-downloads/repo > git-repo/repo
-        chmod +x git-repo/repo
-        echo "REPO=$GITHUB_WORKSPACE/git-repo/repo" >> $GITHUB_ENV
+        mkdir -p ~/bin
+        curl -o ~/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
+        chmod +x ~/bin/repo
+        echo "$HOME/bin" >> $GITHUB_PATH
+
     - name: Repo init & sync
       run: |
         BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
-        $REPO init -u https://android.googlesource.com/kernel/manifest -b common-$BRANCH
-        $REPO sync -j$(nproc --all) --fail-fast
+        repo init -u https://android.googlesource.com/kernel/manifest -b common-$BRANCH
+        repo sync -j$(nproc) --fail-fast
 
-    - name: Clean kernel source tree (GKI requirement)
-      working-directory: common
-      run: |
-        set -e
-        echo "==> Running make mrproper to satisfy GKI/Kleaf"
-        make mrproper
-        echo "✓ Kernel source tree cleaned"
     # --------------------------------------------------
-    # EXTERNAL PATCHES
+    # CLEAN (ONCE!)
+    # --------------------------------------------------
+    - name: Clean kernel tree (GKI)
+      working-directory: common
+      run: make mrproper
+
+    # --------------------------------------------------
+    # PATCHES
     # --------------------------------------------------
     - name: Clone external repos
       run: |
         git clone https://github.com/ShirkNeko/susfs4ksu.git
-        git clone https://github.com/ShirkNeko/SukiSU_patch.git
         git clone https://github.com/MiRinChan/AnyKernel3.git
-    # --------------------------------------------------
-    # KernelSU (SukiSU)
-    # --------------------------------------------------
+
     - name: Add SukiSU
-      if: ${{ inputs.kernelsu_variant == 'SukiSU' }}
       run: |
         curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh \
           | bash -s ${{ inputs.kernelsu_branch }}
-    # --------------------------------------------------
-    # SUSFS
-    # --------------------------------------------------
-    - name: Apply SUSFS core patch
-      working-directory: common
-      run: |
-        patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch || true
-        rm -f fs/proc/*.rej || true
-    - name: Copy SUSFS files
-      run: |
-        cp -r susfs4ksu/kernel_patches/fs/* common/fs/
-        cp -r susfs4ksu/kernel_patches/include/linux/* common/include/linux/
 
-        
-    - name: Create flask.h for KernelSU
-      run: |
-          python3 - << 'PYCODE'
-          import os
-          header_dir = "common/security/selinux/include"
-          flask_h = f"{header_dir}/flask.h"
-          
-          if os.path.exists(flask_h):
-              print("✓ flask.h already exists")
-              exit(0)
-          
-          os.makedirs(header_dir, exist_ok=True)
-          
-          with open(flask_h, 'w') as f:
-              f.write('''/* This file is automatically generated */
-          #ifndef _SELINUX_FLASK_H_
-          #define _SELINUX_FLASK_H_
-          
-          #define SECCLASS_SECURITY 1
-          #define SECCLASS_PROCESS 2
-          #define SECCLASS_SYSTEM 3
-          #define SECCLASS_CAPABILITY 4
-          #define SECCLASS_FILE 6
-          #define SECCLASS_DIR 7
-          
-          #define SECINITSID_KERNEL 1
-          #define SECINITSID_SECURITY 2
-          #define SECINITSID_UNLABELED 3
-          
-          #define PROCESS__FORK 1
-          #define PROCESS__TRANSITION 2
-          #define PROCESS__SIGKILL 4
-          #define PROCESS__PTRACE 8
-          #define PROCESS__GETCAP 14
-          #define PROCESS__SETCAP 15
-          
-          #define FILE__IOCTL 1
-          #define FILE__READ 2
-          #define FILE__WRITE 3
-          #define FILE__CREATE 4
-          #define FILE__GETATTR 5
-          #define FILE__SETATTR 6
-          #define FILE__EXECUTE 14
-          #define FILE__OPEN 19
-          #define FILE__ENTRYPOINT 22
-          
-          #define DIR__READ 2
-          #define DIR__WRITE 3
-          #define DIR__CREATE 4
-          #define DIR__SEARCH 14
-          #define DIR__ADD_NAME 15
-          #define DIR__OPEN 18
-          
-          #define CAPABILITY__SYS_ADMIN 22
-          #define CAPABILITY__SYS_PTRACE 20
-          #define CAPABILITY__SETUID 8
-          #define CAPABILITY__SETGID 7
-          
-          #endif
-          ''')
-          print(f"✓ Created {flask_h}")
-          PYCODE
-    - name: Guard SELinux headers
-      run: |
-          find common -name "*.c" -o -name "*.h" | xargs sed -i \
-            's|#include <security/selinux/include/security.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n&\n#endif|g' || true
-    - name: Prepare defconfig
+    - name: Apply SUSFS
       working-directory: common
       run: |
-          set -e
-          rm -rf security/baseband-guard || true
-          sed -i '/baseband_guard/d' security/Kconfig || true
-          echo "✓ Defconfig prepared"
-    - name: Create config fragment
-      run: |
-          cat > /tmp/kernelsu_susfs.config << 'EOF'
-          CONFIG_KSU=y
-          CONFIG_KSU_MANUAL_HOOK=y
-          CONFIG_KSU_KPROBES_HOOK=n
-          CONFIG_SUSFS=y
-          CONFIG_KSU_SUSFS=y
-          CONFIG_SUSFS_PROC=y
-          CONFIG_SUSFS_MAGIC_MOUNT=y
-          CONFIG_SUSFS_AUTO_BIND=y
-          CONFIG_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_SU=n
-          CONFIG_CFG80211=m
-          CONFIG_MAC80211=m
-          CONFIG_TMPFS_XATTR=y
-          CONFIG_TMPFS_POSIX_ACL=y
-          # SELinux required defaults (GKI)
-          CONFIG_SECURITY_SELINUX=y
-          CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS=8
-          CONFIG_SECURITY_SELINUX_SID2STR_CACHE_SIZE=0
-          EOF
+        patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch
+        cp ../susfs4ksu/kernel_patches/fs/* fs/
+        cp ../susfs4ksu/kernel_patches/include/linux/* include/linux/
+
     # --------------------------------------------------
-    # ✅ SINGLE CONFIG MERGE (KSU + SUSFS + NetHunter)
+    # DEFCONFIG (SINGLE SOURCE)
     # --------------------------------------------------
-    - name: Merge Kernel config (GKI safe)
+    - name: Patch gki_defconfig
+      working-directory: common
       run: |
-        DEFCONFIG=common/arch/arm64/configs/gki_defconfig
-        MERGE=common/scripts/kconfig/merge_config.sh
-        chmod +x "$MERGE"
-        cat > /tmp/nethunter.config << 'EOF'
-        # ==========================
-        # KernelSU
-        # ==========================
+        DEF=arch/arm64/configs/gki_defconfig
+        sed -i '/CONFIG_KSU/d;/CONFIG_SUSFS/d' $DEF
+
+        cat >> $DEF << 'EOF'
         CONFIG_KSU=y
         CONFIG_KSU_MANUAL_HOOK=y
-        CONFIG_KSU_KPROBES_HOOK=n
-        
-        # ==========================
-        # SUSFS
-        # ==========================
         CONFIG_SUSFS=y
         CONFIG_KSU_SUSFS=y
-        CONFIG_SUSFS_PROC=y
-        CONFIG_SUSFS_MAGIC_MOUNT=y
-        CONFIG_SUSFS_AUTO_BIND=y
-        CONFIG_SUSFS_SUS_PATH=y
-        # SELinux required defaults (GKI)
-        CONFIG_SECURITY_SELINUX=y
-        CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS=8
-        CONFIG_SECURITY_SELINUX_SID2STR_CACHE_SIZE=0
-        
-        # ==========================
-        # NetHunter (GKI SAFE)
-        # ==========================
-        
-        # Wireless
         CONFIG_CFG80211=m
         CONFIG_MAC80211=m
-        
-        # USB gadget + HID
         CONFIG_USB_GADGET=y
         CONFIG_USB_CONFIGFS=y
-        
-        CONFIG_USB_NET_DRIVERS=y
-        CONFIG_USB_RNDIS_HOST=m
-        CONFIG_USB_NET_CDC_ECM=m
-        CONFIG_USB_NET_CDC_NCM=m
-        
-        CONFIG_USB_HID=m
-        CONFIG_USB_HIDDEV=y
-        
-        # ==========================
-        # Filesystem
-        # ==========================
         CONFIG_TMPFS_XATTR=y
         CONFIG_TMPFS_POSIX_ACL=y
-        
-        # ==========================
-        # Network
-        # ==========================
-        CONFIG_TCP_CONG_BBR=y
-        CONFIG_NET_SCH_FQ=y
-        CONFIG_DEFAULT_BBR=y
         EOF
-        "$MERGE" -m "$DEFCONFIG" /tmp/nethunter.config
-        cp .config "$DEFCONFIG"
-        echo "Merged config:"
-        grep -E 'CONFIG_(KSU|SUSFS|CFG80211|MAC80211|USB_GADGET|BBR)' "$DEFCONFIG"
-    - name: Sync gki_defconfig (savedefconfig)
-      run: |
-        cd common
-        make ARCH=arm64 savedefconfig
-        cp defconfig arch/arm64/configs/gki_defconfig
-        echo "✓ gki_defconfig synced"
-        
-        make ARCH=arm64 gki_defconfig
 
-        sed -i 's/CONFIG_KSU_ALLOWLIST=y/CONFIG_KSU_ALLOWLIST=n/' .config
-            # --------------------------------------------------
-    # BUILD
+    # --------------------------------------------------
+    # BUILD (ONLY build.sh)
     # --------------------------------------------------
     - name: Build kernel
       run: |
-        sed -i \
-          -e 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' \
-          -e '/MODULES_ORDER=android\/gki_aarch64_modules/d' \
-          -e '/KMI_SYMBOL_LIST_STRICT_MODE/d' \
-          common/build.config.gki.aarch64
-        if [ -x build/build.sh ]; then
-          LTO=thin \
-          BUILD_CONFIG=common/build.config.gki.aarch64 \
-          build/build.sh CC="/usr/bin/ccache clang"
-        else
-          tools/bazel build --config=fast //common:kernel_aarch64_dist
-        fi
+        sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64
+        build/build.sh CC="/usr/bin/ccache clang"
+
     # --------------------------------------------------
     # PACKAGE
     # --------------------------------------------------
     - name: Package AnyKernel3
       run: |
-        IMG=$(ls out/*/dist/Image 2>/dev/null || ls bazel-bin/common/kernel_aarch64/Image)
+        IMG=$(find out -name Image | head -1)
         cp "$IMG" AnyKernel3/Image
-        cd AnyKernel3
-        zip -r ../kernel.zip .
+        cd AnyKernel3 && zip -r ../kernel.zip .
+
     - uses: actions/upload-artifact@v4
       with:
         name: kernel
         path: kernel.zip
-          
-    - name: Create flask.h for KernelSU
-      run: |
-          python3 - << 'PYCODE'
-          import os
-          header_dir = "common/security/selinux/include"
-          flask_h = f"{header_dir}/flask.h"
-          
-          if os.path.exists(flask_h):
-              print("✓ flask.h already exists")
-              exit(0)
-          
-          os.makedirs(header_dir, exist_ok=True)
-          
-          with open(flask_h, 'w') as f:
-              f.write('''/* This file is automatically generated */
-          #ifndef _SELINUX_FLASK_H_
-          #define _SELINUX_FLASK_H_
-          
-          #define SECCLASS_SECURITY 1
-          #define SECCLASS_PROCESS 2
-          #define SECCLASS_SYSTEM 3
-          #define SECCLASS_CAPABILITY 4
-          #define SECCLASS_FILE 6
-          #define SECCLASS_DIR 7
-          
-          #define SECINITSID_KERNEL 1
-          #define SECINITSID_SECURITY 2
-          #define SECINITSID_UNLABELED 3
-          
-          #define PROCESS__FORK 1
-          #define PROCESS__TRANSITION 2
-          #define PROCESS__SIGKILL 4
-          #define PROCESS__PTRACE 8
-          #define PROCESS__GETCAP 14
-          #define PROCESS__SETCAP 15
-          
-          #define FILE__IOCTL 1
-          #define FILE__READ 2
-          #define FILE__WRITE 3
-          #define FILE__CREATE 4
-          #define FILE__GETATTR 5
-          #define FILE__SETATTR 6
-          #define FILE__EXECUTE 14
-          #define FILE__OPEN 19
-          #define FILE__ENTRYPOINT 22
-          
-          #define DIR__READ 2
-          #define DIR__WRITE 3
-          #define DIR__CREATE 4
-          #define DIR__SEARCH 14
-          #define DIR__ADD_NAME 15
-          #define DIR__OPEN 18
-          
-          #define CAPABILITY__SYS_ADMIN 22
-          #define CAPABILITY__SYS_PTRACE 20
-          #define CAPABILITY__SETUID 8
-          #define CAPABILITY__SETGID 7
-          
-          #endif
-          ''')
-          print(f"✓ Created {flask_h}")
-          PYCODE
-
-    - name: Guard SELinux headers
-      run: |
-          find common -name "*.c" -o -name "*.h" | xargs sed -i \
-            's|#include <security/selinux/include/security.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n&\n#endif|g' || true
-
-    - name: Prepare defconfig
-      working-directory: common
-      run: |
-          rm -rf security/baseband-guard || true
-          sed -i '/baseband_guard/d' security/Kconfig || true
-
-    - name: Clean tree BEFORE config
-      working-directory: common
-      run: |
-          make mrproper || true
-          echo "✓ Tree cleaned (before config generation)"
-
-    - name: Create config fragment
-      run: |
-          cat > /tmp/gki_nethunter.config << 'EOF'
-          CONFIG_KSU=y
-          CONFIG_KSU_MANUAL_HOOK=y
-          CONFIG_KSU_KPROBES_HOOK=n
-          CONFIG_SUSFS=y
-          CONFIG_KSU_SUSFS=y
-          CONFIG_SUSFS_PROC=y
-          CONFIG_SUSFS_MAGIC_MOUNT=y
-          CONFIG_SUSFS_AUTO_BIND=y
-          CONFIG_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_SU=n
-          CONFIG_CFG80211=m
-          CONFIG_MAC80211=m
-          CONFIG_USB_GADGET=y
-          CONFIG_USB_CONFIGFS=y
-          CONFIG_USB_NET_DRIVERS=y
-          CONFIG_USB_RNDIS_HOST=m
-          CONFIG_USB_NET_CDC_ECM=m
-          CONFIG_USB_NET_CDC_NCM=m
-          CONFIG_USB_HID=m
-          CONFIG_USB_HIDDEV=y
-          CONFIG_TMPFS_XATTR=y
-          CONFIG_TMPFS_POSIX_ACL=y
-          CONFIG_TCP_CONG_BBR=y
-          CONFIG_NET_SCH_FQ=y
-          CONFIG_DEFAULT_BBR=y
-          CONFIG_TCP_CONG_ADVANCED=y
-          CONFIG_TCP_CONG_BIC=n
-          CONFIG_TCP_CONG_WESTWOOD=n
-          CONFIG_TCP_CONG_HTCP=n
-          CONFIG_IP_NF_TARGET_TTL=y
-          CONFIG_IP6_NF_TARGET_HL=y
-          CONFIG_IP6_NF_MATCH_HL=y
-          CONFIG_IP_SET=y
-          CONFIG_IP_SET_MAX=65534
-          CONFIG_IP_SET_BITMAP_IP=y
-          CONFIG_IP_SET_BITMAP_IPMAC=y
-          CONFIG_IP_SET_BITMAP_PORT=y
-          CONFIG_IP_SET_HASH_IP=y
-          CONFIG_IP_SET_HASH_IPMARK=y
-          CONFIG_IP_SET_HASH_IPPORT=y
-          CONFIG_IP_SET_HASH_IPPORTIP=y
-          CONFIG_IP_SET_HASH_IPPORTNET=y
-          CONFIG_IP_SET_HASH_IPMAC=y
-          CONFIG_IP_SET_HASH_MAC=y
-          CONFIG_IP_SET_HASH_NETPORTNET=y
-          CONFIG_IP_SET_HASH_NET=y
-          CONFIG_IP_SET_HASH_NETNET=y
-          CONFIG_IP_SET_HASH_NETPORT=y
-          CONFIG_IP_SET_HASH_NETIFACE=y
-          CONFIG_IP_SET_LIST_SET=y
-          EOF
-          
-          echo "✓ Created NetHunter config"
-
-    - name: Build config (WITHOUT savedefconfig)
-      working-directory: common
-      run: |
-          set -e
-          echo "==> Building config WITHOUT savedefconfig"
-          
-          make ARCH=arm64 gki_defconfig
-          ./scripts/kconfig/merge_config.sh -m .config /tmp/gki_nethunter.config
-          
-          if grep -q "CONFIG_SUSFS=y" .config; then
-            echo "✓ SUSFS enabled"
-          else
-            echo "⚠️ Forcing SUSFS"
-            echo "CONFIG_SUSFS=y" >> .config
-            echo "CONFIG_KSU_SUSFS=y" >> .config
-          fi
-          
-          echo "✓ Config ready (no savedefconfig)"
-          
-    - name: Disable defconfig validation
-      working-directory: common
-      run: |
-          set -e
-          
-          sed -i 's/POST_DEFCONFIG_CMDS=.*/POST_DEFCONFIG_CMDS=""/g' build.config.gki.aarch64 || true
-          sed -i 's/PRE_DEFCONFIG_CMDS=.*/PRE_DEFCONFIG_CMDS=""/g' build.config.gki.aarch64 || true
-          
-          if [ -f "build/kernel/kleaf/impl/defconfig.bzl" ]; then
-            sed -i 's/check_defconfig = True/check_defconfig = False/g' build/kernel/kleaf/impl/defconfig.bzl || true
-          fi
-          
-          if [ -f "build/kernel/kleaf/impl/kernel_config.bzl" ]; then
-            sed -i 's/"check_defconfig": True/"check_defconfig": False/g' build/kernel/kleaf/impl/kernel_config.bzl || true
-          fi
-          
-          echo "✓ Validation disabled"
-
-    - name: Configure KernelSU + SUSFS
-      working-directory: ${{ env.KERNEL_ROOT }}
-      run: |
-          cat >> common/arch/arm64/configs/gki_defconfig << 'EOF'
-          CONFIG_KSU=y
-          CONFIG_KSU_MANUAL_HOOK=y
-          CONFIG_KSU_MANUAL_SU=n
-      
-          CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_SUS_SU=n
-      
-          CONFIG_TMPFS_XATTR=y
-          CONFIG_TMPFS_POSIX_ACL=y
-      
-          # Pixel / Android 15 SAFE SETTINGS
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=n
-          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=n
-          CONFIG_KSU_SUSFS_SUS_MOUNT=n
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=n
-          EOF
-
-          sed -i 's/check_defconfig//' common/build.config.gki
-      
-    - name: Build kernel
-      uses: nick-fields/retry@v3
-      with:
-          timeout_minutes: 90
-          max_attempts: 2
-          retry_on: timeout
-          command: |
-            ( while sleep 300; do echo "[keepalive] $(date)"; done ) &
-            KEEPALIVE_PID=$!
-            trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
-
-            # Clean the tree first
-            cd common && make mrproper && cd ..
-            
-            sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
-            sed -i '/MODULES_ORDER/d' common/build.config.gki.aarch64 || true
-            sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
-            
-            if [ -f "build/build.sh" ]; then
-              LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 \
-                SKIP_DEFCONFIG_CHECK=1 \
-                build/build.sh CC="/usr/bin/ccache clang"
-            else
-              tools/bazel build --config=fast --config=stamp //common:kernel_aarch64_dist
-            fi
-            
-    - name: Show ccache stats
-      run: ccache --show-stats
-
-    - name: Package AnyKernel3
-      run: |
-          IMG=$(find out -name Image 2>/dev/null | head -1 || find bazel-bin -name Image | head -1)
-          cp "$IMG" AnyKernel3/
-          mkdir -p AnyKernel3/modules/vendor/lib/modules
-          find out -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
-          cd AnyKernel3 && zip -r ../kernel.zip .
-
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-          name: sukisu-kernel
-          path: kernel.zip
-    - name: Save repo cache
-      if: steps.repo-cache.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v4
-      with:
-          path: |
-            .repo
-            common
-          key: repo-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}
-    - name: Save ccache
-      uses: actions/cache/save@v4
-      with:
-          path: /home/runner/.ccache
-          key: ccache-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}-${{ github.run_id }}
