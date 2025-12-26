@@ -75,6 +75,7 @@ jobs:
         echo "REPO=$GITHUB_WORKSPACE/git-repo/repo" >> $GITHUB_ENV
     - name: Repo init & sync
       run: |
+       make mrproper
         BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
         $REPO init -u https://android.googlesource.com/kernel/manifest -b common-$BRANCH
         $REPO sync -j$(nproc --all) --fail-fast
@@ -285,6 +286,7 @@ jobs:
     # --------------------------------------------------
     - name: Build kernel
       run: |
+       make mrproper
         sed -i \
           -e 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' \
           -e '/MODULES_ORDER=android\/gki_aarch64_modules/d' \
