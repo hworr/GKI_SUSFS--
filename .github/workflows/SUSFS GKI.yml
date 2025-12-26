@@ -436,6 +436,9 @@ jobs:
                 SKIP_DEFCONFIG_CHECK=1 \
                 build/build.sh CC="/usr/bin/ccache clang"
             else
+              # Clean Bazel cache to force fresh build
+              tools/bazel clean --expunge
+              
               tools/bazel build \
                 --config=fast \
                 --config=stamp \
