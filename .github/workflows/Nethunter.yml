@@ -198,6 +198,10 @@ jobs:
           CONFIG_MAC80211=m
           CONFIG_TMPFS_XATTR=y
           CONFIG_TMPFS_POSIX_ACL=y
+          # SELinux required defaults (GKI)
+          CONFIG_SECURITY_SELINUX=y
+          CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS=8
+          CONFIG_SECURITY_SELINUX_SID2STR_CACHE_SIZE=0
           EOF
     # --------------------------------------------------
     # ✅ SINGLE CONFIG MERGE (KSU + SUSFS + NetHunter)
