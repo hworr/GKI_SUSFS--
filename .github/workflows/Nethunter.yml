@@ -276,11 +276,11 @@ jobs:
         make ARCH=arm64 savedefconfig
         cp defconfig arch/arm64/configs/gki_defconfig
         echo "✓ gki_defconfig synced"
-        cd common
+        
         make ARCH=arm64 gki_defconfig
-        sed -i 's/CONFIG_KSU_ALLOWLIST=y/CONFIG_KSU_ALLOWLIST=n/' common/.config
 
-    # --------------------------------------------------
+        sed -i 's/CONFIG_KSU_ALLOWLIST=y/CONFIG_KSU_ALLOWLIST=n/' .config
+            # --------------------------------------------------
     # BUILD
     # --------------------------------------------------
     - name: Build kernel
