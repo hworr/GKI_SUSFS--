@@ -392,4 +392,219 @@ jobs:
           echo "| Kernel | ${{ inputs.kernel_version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Clang | ${{ inputs.clang_version }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Build completed successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Build completed successfully!" >> $GITHUB_STEP_SUMMARY                        e: docker_ksun
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      android_version:
+        type: string
+        default: android15
+        required: true
+      kernel_version:
+        type: string
+        default: "6.6"
+        required: true
+      sub_level:
+        type: string
+        default: "102"
+        required: true
+      os_patch_level:
+        type: string
+        default: "2025-10"
+        required: true
+      require_susfs:
+        type: boolean
+        default: true
+        required: false
+        - cgroup hierarchy: cgroupv2
+  Controllers:
+  - cpu: missing
+  - cpuset: missing
+  - io: missing
+  - memory: missing
+  - pids: missing
+- CONFIG_NAMESPACES: enabled
+- CONFIG_NET_NS: enabled
+- CONFIG_PID_NS: enabled
+- CONFIG_IPC_NS: enabled
+- CONFIG_UTS_NS: enabled
+- CONFIG_CGROUPS: enabled
+- CONFIG_CGROUP_CPUACCT: enabled
+- CONFIG_CGROUP_DEVICE: enabled
+- CONFIG_CGROUP_FREEZER: enabled
+- CONFIG_CGROUP_SCHED: enabled
+- CONFIG_CPUSETS: enabled
+- CONFIG_MEMCG: enabled
+- CONFIG_KEYS: enabled
+- CONFIG_VETH: enabled
+- CONFIG_BRIDGE: enabled
+- CONFIG_BRIDGE_NETFILTER: enabled
+- CONFIG_IP_NF_FILTER: enabled
+- CONFIG_IP_NF_MANGLE: enabled
+- CONFIG_IP_NF_TARGET_MASQUERADE: enabled
+- CONFIG_IP6_NF_FILTER: enabled
+- CONFIG_IP6_NF_MANGLE: enabled
+- CONFIG_IP6_NF_TARGET_MASQUERADE: missing
+- CONFIG_NETFILTER_XT_MATCH_ADDRTYPE: enabled
+- CONFIG_NETFILTER_XT_MATCH_CONNTRACK: enabled
+- CONFIG_NETFILTER_XT_MATCH_IPVS: enabled
+- CONFIG_NETFILTER_XT_MARK: enabled
+- CONFIG_IP_NF_RAW: enabled
+- CONFIG_IP_NF_NAT: enabled
+- CONFIG_NF_NAT: enabled
+- CONFIG_IP6_NF_RAW: enabled
+- CONFIG_IP6_NF_NAT: missing
+- CONFIG_NF_NAT: enabled
+- CONFIG_POSIX_MQUEUE: enabled
+- CONFIG_NF_NAT_IPV4: enabled
+- CONFIG_NF_NAT_NEEDED: enabled
+
+Optional Features:
+- CONFIG_USER_NS: enabled
+- CONFIG_SECCOMP: enabled
+        echo "MKBOOTIMG=$GITHUB_WORKSPACE/mkbootimg/mkbootimg.py" >> $GITHUB_ENV
+    # --------------------------------------------------
+    # KERNEL SOURCE
+    # --------------------------------------------------
+    - name: Init kernel source
+      run: |
+        cd "$KERNEL_ROOT"
+        BRANCH="common-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
+        repo init -u https://android.googlesource.com/kernel/manifest -b "$BRANCH" --depth=1
+        repo sync -c -j$(nproc) --no-tags --fail-fast
+    # --------------------------------------------------
+    # KernelSU-Next (OFFICIAL)
+    # --------------------------------------------------
+    - name: Add KernelSU-Next
+      run: |
+        cd "$KERNEL_ROOT"
+        curl -LSs https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh | bash -
+    # --------------------------------------------------
+    # SUSFS CORE (REQUIRED)
+    #--------------------------------------------------
+    - name: Apply SUSFS core patch (SAFE)
+      if: ${{ inputs.require_susfs }}
+      working-directory: ${{ env.KERNEL_ROOT }}/common
+      run: |
+        set -e
+        PATCH="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
+        echo "==> Applying SUSFS core patch (Pixel safe mode)"
+        patch -p1 < "$PATCH" || true
+    
+        # 🔥 WICHTIG: proc/base rejects IMMER entfernen
+        rm -f fs/proc/base.c.rej
+        rm -f fs/proc/*.rej
+
+    # --------------------------------------------------
+    # SUSFS FIX PATCHES (OPTIONAL / SAFE)
+    # --------------------------------------------------
+    - name: Apply SUSFS fix patches (optional)
+      working-directory: ${{ env.KERNEL_ROOT }}/common
+      run: |
+        set -e
+        FIX="$KERNEL_PATCHES/wild/susfs_fix_patches/v2.0.0"
+        apply_optional() {
+        local p="$1"
+        [ -f "$p" ] || return 0
+        for lvl in 0 1 2; do
+          if patch -p$lvl --dry-run < "$p" >/dev/null 2>&1; then
+            patch -p$lvl < "$p"
+            echo "✔ applied $(basename "$p")"
+            return
+            fi
+          done
+          echo "⚠ skipped $(basename "$p")"
+          }
+          apply_optional "$FIX/fix_task_mmu.c.patch"
+          apply_optional "$FIX/1_fix_base.c.patch"
+          rm -f fs/proc/*.rej
+    # --------------------------------------------------
+    # KERNEL CONFIG (CLEAN + SAFE + DOCKER + BBR)
+    # --------------------------------------------------
+    - name: Kernel config
+      run: |
+        cd "$KERNEL_ROOT"
+        CFG="common/arch/arm64/configs/gki_defconfig"
+        add() { grep -q "^$1=" "$CFG" || echo "$1=$2" >> "$CFG"; }
+        # KernelSU
+        add CONFIG_KSU y
+        add CONFIG_KSU_MANUAL_HOOK y
+        add CONFIG_KSU_MANUAL_SU n
+        # SUSFS (Pixel SAFE)
+        if [[ "${{ inputs.require_susfs }}" == "true" ]]; then
+          add CONFIG_KSU_SUSFS y
+          add CONFIG_TMPFS_XATTR y
+          add CONFIG_TMPFS_POSIX_ACL y
+          add CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT y
+          add CONFIG_KSU_SUSFS_SUS_PATH y
+          add CONFIG_KSU_SUSFS_SPOOF_UNAME y
+          # ❌ UMOUNT = OFF (WLAN / MODEM SAFE)
+          add CONFIG_KSU_SUSFS_TRY_UMOUNT n
+          add CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT n
+          add CONFIG_KSU_SUSFS_SUS_MOUNT n
+          add CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT n
+          add CONFIG_KSU_SUSFS_ENABLE_LOG n
+        fi
+        # Namespaces (Docker)
+        add CONFIG_PID_NS y
+        add CONFIG_IPC_NS y
+        add CONFIG_USER_NS y
+        add CONFIG_POSIX_MQUEUE y
+        add CONFIG_CGROUPS y
+        add CONFIG_CGROUP_CPUACCT y
+        add CONFIG_CGROUP_SCHED y
+        add CONFIG_MEMCG y
+        add CONFIG_BLK_CGROUP y
+        add CONFIG_OVERLAY_FS y
+        # BBR
+        add CONFIG_TCP_CONG_ADVANCED y
+        add CONFIG_TCP_CONG_BBR y
+        add CONFIG_NET_SCH_FQ y
+        sed -i 's/check_defconfig//' common/build.config.gki
+        sed -i 's/-maybe-dirty//g; s/-dirty//g' common/scripts/setlocalversion
+    # --------------------------------------------------
+    # BUILD
+    # --------------------------------------------------
+    - name: Build kernel
+      run: |
+        cd "$KERNEL_ROOT"
+        sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64
+        sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64
+        sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64
+        tools/bazel build --config=fast //common:kernel_aarch64_dist
+    # --------------------------------------------------
+    # BOOT IMAGES
+    # --------------------------------------------------
+    - name: Prepare AVB key
+      run: |
+        mkdir -p kernel-build-tools/linux-x86/share/avb
+        openssl genrsa -out kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem 2048
+        echo "BOOT_SIGN_KEY_PATH=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem" >> $GITHUB_ENV
+    - name: Build boot images
+      run: |
+        cd "$KERNEL_ROOT/bazel-bin/common/kernel_aarch64"
+        gzip -n -k -f Image
+        lz4 -f Image Image.lz4
+        for s in "" ".gz" ".lz4"; do
+          k="Image$s"
+          o="boot${s//./-}.img"
+          [ -z "$s" ] && o="boot.img"
+          $MKBOOTIMG --header_version 4 --kernel "$k" --output "$o"
+          $AVBTOOL add_hash_footer \
+            --partition_name boot \
+            --partition_size $((64*1024*1024)) \
+            --image "$o" \
+            --algorithm SHA256_RSA2048 \
+            --key "$BOOT_SIGN_KEY_PATH"
+          cp "$o" "$GITHUB_WORKSPACE/${CONFIG}-$o"
+        done
+    - name: Upload boot images
+      uses: actions/upload-artifact@v4
+      with:
+        name: boot-images-${{ env.CONFIG }}
+        path: ${{ env.CONFIG }}-boot*.im
