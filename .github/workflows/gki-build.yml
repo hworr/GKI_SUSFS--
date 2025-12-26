@@ -1,0 +1,264 @@
+name: GKI Kernel + KernelSU/SuKiSu + SUSFS
+
+on:
+  workflow_dispatch:
+    inputs:
+      ksu_variant:
+        description: 'Root Variante'
+        required: true
+        default: 'sukisu'
+        type: choice
+        options:
+          - sukisu
+          - kernelsu-next
+      kernel_version:
+        description: 'Kernel Version'
+        required: true
+        default: '6.6'
+        type: choice
+        options:
+          - '6.1'
+          - '6.6'
+      android_version:
+        description: 'Android Version'
+        required: true
+        default: '15'
+        type: choice
+        options:
+          - '14'
+          - '15'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    env:
+      WORKDIR: ${{ github.workspace }}
+
+    steps:
+      - name: Setup Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git curl wget bc bison flex libssl-dev libelf-dev \
+            python3 python-is-python3 zip unzip libncurses-dev lld llvm cpio
+
+      - name: Set Build Variables
+        id: vars
+        run: |
+          # Branch basierend auf Android + Kernel Version
+          if [ "${{ inputs.android_version }}" == "15" ] && [ "${{ inputs.kernel_version }}" == "6.6" ]; then
+            BRANCH="android15-6.6"
+            SUSFS_BRANCH="gki-android15-6.6"
+          elif [ "${{ inputs.android_version }}" == "15" ] && [ "${{ inputs.kernel_version }}" == "6.1" ]; then
+            BRANCH="android15-6.1"
+            SUSFS_BRANCH="gki-android15-6.1"
+          elif [ "${{ inputs.android_version }}" == "14" ] && [ "${{ inputs.kernel_version }}" == "6.1" ]; then
+            BRANCH="android14-6.1"
+            SUSFS_BRANCH="gki-android14-6.1"
+          else
+            BRANCH="android15-6.6"
+            SUSFS_BRANCH="gki-android15-6.6"
+          fi
+          
+          echo "BRANCH=$BRANCH" >> $GITHUB_OUTPUT
+          echo "SUSFS_BRANCH=$SUSFS_BRANCH" >> $GITHUB_OUTPUT
+          echo "Building: $BRANCH with SUSFS $SUSFS_BRANCH"
+
+      - name: Clone GKI Kernel
+        run: |
+          cd $WORKDIR
+          git clone --depth=1 -b ${{ steps.vars.outputs.BRANCH }} \
+            https://android.googlesource.com/kernel/common kernel
+
+      - name: Clone Clang Toolchain
+        run: |
+          cd $WORKDIR
+          mkdir -p clang
+          
+          # Zyc Clang (besser für KernelSU)
+          wget -q https://github.com/AliGH0st/Zyc-Clang-19/releases/download/Zyc-Clang-19.0.3/Zyc-Clang-19.0.3.tar.gz
+          tar -xzf Zyc-Clang-19.0.3.tar.gz -C clang
+          rm Zyc-Clang-19.0.3.tar.gz
+
+      - name: Setup SuKiSu
+        if: inputs.ksu_variant == 'sukisu'
+        run: |
+          cd $WORKDIR/kernel
+          
+          echo "Installing SuKiSu..."
+          curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SuKiSu/main/kernel/setup.sh" | bash -s main
+          
+          # Verify
+          if [ -d "KernelSU" ]; then
+            echo "✓ SuKiSu installed"
+            ls -la KernelSU/
+          else
+            echo "✗ SuKiSu installation failed"
+            exit 1
+          fi
+
+      - name: Setup KernelSU Next
+        if: inputs.ksu_variant == 'kernelsu-next'
+        run: |
+          cd $WORKDIR/kernel
+          
+          echo "Installing KernelSU Next..."
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+          
+          if [ -d "KernelSU" ]; then
+            echo "✓ KernelSU Next installed"
+          else
+            echo "✗ KernelSU installation failed"
+            exit 1
+          fi
+
+      - name: Setup SUSFS
+        run: |
+          cd $WORKDIR
+          
+          echo "Cloning SUSFS..."
+          git clone --depth=1 -b ${{ steps.vars.outputs.SUSFS_BRANCH }} \
+            https://gitlab.com/simonpunk/susfs4ksu.git susfs
+          
+          cd kernel
+          
+          SUSFS_PATCHES="$WORKDIR/susfs/kernel_patches"
+          KV="${{ inputs.kernel_version }}"
+          
+          # SUSFS Dateien kopieren
+          echo "Copying SUSFS files..."
+          cp "$SUSFS_PATCHES/fs/susfs.c" fs/
+          cp "$SUSFS_PATCHES/include/linux/susfs.h" include/linux/
+          cp "$SUSFS_PATCHES/fs/sus_su.c" fs/ 2>/dev/null || true
+          
+          # Kernel Patches anwenden
+          echo "Applying kernel patches..."
+          KPATCH_DIR="$SUSFS_PATCHES/50_add_susfs_in_${KV}"
+          if [ -d "$KPATCH_DIR" ]; then
+            for p in "$KPATCH_DIR"/*.patch; do
+              echo "Applying: $(basename $p)"
+              patch -p1 < "$p" || true
+            done
+          fi
+          
+          # KernelSU SUSFS Patch
+          echo "Applying KernelSU SUSFS integration..."
+          KSU_PATCH="$SUSFS_PATCHES/KernelSU/10_enable_susfs_for_ksu.patch"
+          if [ -f "$KSU_PATCH" ]; then
+            cd KernelSU
+            patch -p1 < "$KSU_PATCH" || true
+            cd ..
+          fi
+          
+          echo "✓ SUSFS setup complete"
+
+      - name: Configure Kernel
+        run: |
+          cd $WORKDIR/kernel
+          
+          export PATH="$WORKDIR/clang/bin:$PATH"
+          
+          # GKI defconfig
+          make ARCH=arm64 LLVM=1 gki_defconfig
+          
+          # KernelSU + SUSFS Configs
+          cat >> .config << EOF
+          CONFIG_KSU=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_SUSFS_SUS_SU=n
+          EOF
+          
+          make ARCH=arm64 LLVM=1 olddefconfig
+
+      - name: Build Kernel
+        run: |
+          cd $WORKDIR/kernel
+          
+          export PATH="$WORKDIR/clang/bin:$PATH"
+          
+          echo "Building kernel..."
+          make -j$(nproc) \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CC=clang \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip
+          
+          # Check
+          if [ -f "arch/arm64/boot/Image" ]; then
+            echo "✓ Kernel built successfully!"
+            ls -lh arch/arm64/boot/Image
+          else
+            echo "✗ Build failed"
+            exit 1
+          fi
+
+      - name: Create AnyKernel3 ZIP
+        run: |
+          cd $WORKDIR
+          
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git ak3
+          cd ak3
+          
+          # Cleanup
+          rm -rf .git README.md
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+          sed -i 's/kernel.string=.*/kernel.string=${{ inputs.ksu_variant }}-SUSFS-GKI/g' anykernel.sh
+          
+          # Copy kernel
+          cp $WORKDIR/kernel/arch/arm64/boot/Image .
+          
+          # Create ZIP
+          ZIP_NAME="GKI-${{ inputs.kernel_version }}-${{ inputs.ksu_variant }}-SUSFS-$(date +%Y%m%d).zip"
+          zip -r9 "$WORKDIR/$ZIP_NAME" *
+          
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          echo "✓ Created: $ZIP_NAME"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ github.workspace }}/${{ env.ZIP_NAME }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: gki-${{ inputs.kernel_version }}-${{ github.run_number }}
+          name: "GKI ${{ inputs.kernel_version }} - ${{ inputs.ksu_variant }} + SUSFS"
+          body: |
+            ## GKI Kernel für Pixel 10 Pro
+            
+            - **Kernel:** ${{ inputs.kernel_version }}
+            - **Android:** ${{ inputs.android_version }}
+            - **Root:** ${{ inputs.ksu_variant }}
+            - **SUSFS:** ✓ Enabled
+            
+            ### Installation
+            1. Boot in Recovery/Fastboot
+            2. Flash mit AnyKernel3 oder `fastboot flash boot`
+          files: ${{ github.workspace }}/${{ env.ZIP_NAME }}
+          draft: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
