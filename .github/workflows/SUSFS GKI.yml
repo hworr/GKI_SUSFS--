@@ -134,23 +134,19 @@ jobs:
         run: |
           set -e
           
-          # Try to clone with specific branch, fall back to main if not found
           SUSFS_BRANCH="gki-android${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}"
           
           echo "Attempting to clone SUSFS branch: $SUSFS_BRANCH"
           if ! git clone https://github.com/ShirkNeko/susfs4ksu.git -b "$SUSFS_BRANCH" 2>/dev/null; then
             echo "⚠️ Branch $SUSFS_BRANCH not found, trying alternative formats..."
             
-            # Try without "android" prefix
             SUSFS_BRANCH_ALT="gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}"
             if ! git clone https://github.com/ShirkNeko/susfs4ksu.git -b "$SUSFS_BRANCH_ALT" 2>/dev/null; then
               echo "⚠️ Branch $SUSFS_BRANCH_ALT not found either"
               
-              # List available branches
               echo "Available SUSFS branches:"
               git ls-remote --heads https://github.com/ShirkNeko/susfs4ksu.git | grep gki
               
-              # Clone main branch and check
               git clone https://github.com/ShirkNeko/susfs4ksu.git
               cd susfs4ksu
               echo "Cloned default branch, available branches:"
@@ -159,8 +155,27 @@ jobs:
             fi
           fi
           
-          # Clone AnyKernel3
           git clone https://github.com/MiRinChan/AnyKernel3.git
+
+      - name: Pre-add SUSFS config markers
+        run: |
+          set -e
+          DEFCONFIG="common/arch/arm64/configs/gki_defconfig"
+          
+          echo "==> Pre-configuring SUSFS markers (so KernelSU detects it)"
+          
+          # Remove any existing KSU/SUSFS config
+          sed -i '/^CONFIG_KSU/d' "$DEFCONFIG" 2>/dev/null || true
+          sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG" 2>/dev/null || true
+          
+          # Add minimal SUSFS markers
+          cat >> "$DEFCONFIG" << 'EOF'
+          CONFIG_SUSFS=y
+          CONFIG_KSU_SUSFS=y
+          EOF
+          
+          echo "✓ SUSFS markers added"
+          grep -E "CONFIG_(KSU_)?SUSFS" "$DEFCONFIG" || true
 
       - name: Determine KernelSU branch
         run: |
@@ -172,7 +187,7 @@ jobs:
             fi
           fi
 
-      - name: Add SukiSU
+      - name: Add SukiSU (will now detect SUSFS)
         if: env.KERNELSU_VARIANT == 'SukiSU'
         run: |
           curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
@@ -182,21 +197,17 @@ jobs:
         run: |
           set -e
           
-          # Find the correct patch file
           PATCH_DIR="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches"
           
-          # Try different patch file names
           if [ -f "$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch" ]; then
             PATCH="$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch"
           elif [ -f "$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch" ]; then
             PATCH="$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch"
           else
-            # Find any patch that matches the kernel version
             PATCH=$(find "$PATCH_DIR" -name "*6.6*.patch" | head -1)
             if [ -z "$PATCH" ]; then
-              echo "⚠️ No suitable SUSFS patch found, listing available patches:"
-              ls -la "$PATCH_DIR"/*.patch 2>/dev/null || echo "No patches found"
-              echo "Continuing without SUSFS patch..."
+              echo "⚠️ No suitable SUSFS patch found"
+              ls -la "$PATCH_DIR"/*.patch 2>/dev/null || true
               exit 0
             fi
           fi
@@ -209,7 +220,7 @@ jobs:
             find . -name "*.rej" -delete 2>/dev/null || true
           fi
 
-      - name: Copy SUSFS files (AFTER KernelSU)
+      - name: Copy SUSFS files
         run: |
           set -e
           echo "==> Copying SUSFS files"
@@ -220,15 +231,13 @@ jobs:
             cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/ 2>/dev/null || true
           fi
 
-      - name: Setup SUSFS build files (AFTER KernelSU)
+      - name: Setup SUSFS build files
         run: |
           mkdir -p common/fs/susfs
           python3 - << 'PYCODE'
-          # Create SUSFS Makefile
           with open('common/fs/susfs/Makefile', 'w') as f:
               f.write('obj-$(CONFIG_SUSFS) += susfs.o\nsusfs-y := sus_su.o\n')
           
-          # Create SUSFS Kconfig
           with open('common/fs/susfs/Kconfig', 'w') as f:
               f.write('''config SUSFS
               bool "SUSFS support"
@@ -241,14 +250,12 @@ jobs:
               default y
           ''')
           
-          # Add to fs/Kconfig
           with open('common/fs/Kconfig', 'r') as f:
               kconfig = f.read()
           if 'susfs/Kconfig' not in kconfig:
               with open('common/fs/Kconfig', 'a') as f:
                   f.write('\nsource "fs/susfs/Kconfig"\n')
           
-          # Add to fs/Makefile
           with open('common/fs/Makefile', 'r') as f:
               makefile = f.read()
           if 'CONFIG_SUSFS' not in makefile:
@@ -258,12 +265,11 @@ jobs:
           print("✓ SUSFS build files ready")
           PYCODE
 
-      - name: Create SUSFS stub if needed (AFTER KernelSU)
+      - name: Create SUSFS stub if needed
         run: |
           python3 - << 'PYCODE'
           import os
           
-          # Create stub header if missing
           if not os.path.exists('common/include/linux/susfs.h'):
               with open('common/include/linux/susfs.h', 'w') as f:
                   f.write('''#ifndef _LINUX_SUSFS_H
@@ -277,7 +283,6 @@ jobs:
           #endif
           ''')
           
-          # Create stub source if missing
           if not os.path.exists('common/fs/susfs/sus_su.c'):
               with open('common/fs/susfs/sus_su.c', 'w') as f:
                   f.write('''#include <linux/module.h>
@@ -366,12 +371,9 @@ jobs:
       - name: Create config fragment
         run: |
           cat > /tmp/gki_nethunter.config << 'EOF'
-          # KernelSU Core
           CONFIG_KSU=y
           CONFIG_KSU_MANUAL_HOOK=y
           CONFIG_KSU_KPROBES_HOOK=n
-          
-          # SUSFS Integration
           CONFIG_SUSFS=y
           CONFIG_KSU_SUSFS=y
           CONFIG_SUSFS_PROC=y
@@ -379,12 +381,8 @@ jobs:
           CONFIG_SUSFS_AUTO_BIND=y
           CONFIG_SUSFS_SUS_PATH=y
           CONFIG_KSU_SUSFS_SUS_SU=n
-          
-          # WiFi/Bluetooth Modules
           CONFIG_CFG80211=m
           CONFIG_MAC80211=m
-          
-          # USB Gadget & Networking (NetHunter)
           CONFIG_USB_GADGET=y
           CONFIG_USB_CONFIGFS=y
           CONFIG_USB_NET_DRIVERS=y
@@ -393,12 +391,8 @@ jobs:
           CONFIG_USB_NET_CDC_NCM=m
           CONFIG_USB_HID=m
           CONFIG_USB_HIDDEV=y
-          
-          # Mountify/TMPFS Support
           CONFIG_TMPFS_XATTR=y
           CONFIG_TMPFS_POSIX_ACL=y
-          
-          # BBR TCP Congestion Control
           CONFIG_TCP_CONG_BBR=y
           CONFIG_NET_SCH_FQ=y
           CONFIG_DEFAULT_BBR=y
@@ -406,13 +400,9 @@ jobs:
           CONFIG_TCP_CONG_BIC=n
           CONFIG_TCP_CONG_WESTWOOD=n
           CONFIG_TCP_CONG_HTCP=n
-          
-          # Networking - TTL/HL Manipulation
           CONFIG_IP_NF_TARGET_TTL=y
           CONFIG_IP6_NF_TARGET_HL=y
           CONFIG_IP6_NF_MATCH_HL=y
-          
-          # IPSet Support (NetHunter)
           CONFIG_IP_SET=y
           CONFIG_IP_SET_MAX=65534
           CONFIG_IP_SET_BITMAP_IP=y
@@ -433,32 +423,35 @@ jobs:
           CONFIG_IP_SET_LIST_SET=y
           EOF
           
-          echo "✓ Created NetHunter + KernelSU + SUSFS config fragment"
+          echo "✓ Created NetHunter config"
 
-      - name: Build config
+      - name: Build config (WITHOUT savedefconfig)
         working-directory: common
         run: |
           set -e
-          echo "==> Building final kernel config (WITHOUT savedefconfig)"
+          echo "==> Building config WITHOUT savedefconfig"
           
-          # Start from base GKI config
           make ARCH=arm64 gki_defconfig
-          
-          # Merge our NetHunter features
           ./scripts/kconfig/merge_config.sh -m .config /tmp/gki_nethunter.config
           
-          echo "✓ Config merged successfully (skipping savedefconfig to avoid reordering)"
+          if grep -q "CONFIG_SUSFS=y" .config; then
+            echo "✓ SUSFS enabled"
+          else
+            echo "⚠️ Forcing SUSFS"
+            echo "CONFIG_SUSFS=y" >> .config
+            echo "CONFIG_KSU_SUSFS=y" >> .config
+          fi
+          
+          echo "✓ Config ready (no savedefconfig)"
 
-      - name: Disable defconfig check completely
+      - name: Disable defconfig validation
         working-directory: common
         run: |
           set -e
           
-          # Disable defconfig validation in build system
           sed -i 's/POST_DEFCONFIG_CMDS=.*/POST_DEFCONFIG_CMDS=""/g' build.config.gki.aarch64 || true
           sed -i 's/PRE_DEFCONFIG_CMDS=.*/PRE_DEFCONFIG_CMDS=""/g' build.config.gki.aarch64 || true
           
-          # Disable in Bazel/Kleaf too
           if [ -f "build/kernel/kleaf/impl/defconfig.bzl" ]; then
             sed -i 's/check_defconfig = True/check_defconfig = False/g' build/kernel/kleaf/impl/defconfig.bzl || true
           fi
@@ -467,13 +460,13 @@ jobs:
             sed -i 's/"check_defconfig": True/"check_defconfig": False/g' build/kernel/kleaf/impl/kernel_config.bzl || true
           fi
           
-          echo "✓ Defconfig validation completely disabled"
+          echo "✓ Validation disabled"
 
       - name: Clean tree
         working-directory: common
         run: |
           make mrproper || true
-          echo "✓ Kernel tree cleaned and ready for build"
+          echo "✓ Tree cleaned"
 
       - name: Build kernel
         uses: nick-fields/retry@v3
@@ -512,7 +505,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kernel
+          name: sukisu-kernel
           path: kernel.zip
 
       - name: Save repo cache
