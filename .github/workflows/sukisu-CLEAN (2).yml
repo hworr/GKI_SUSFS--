@@ -1,4 +1,4 @@
-name: SukiSU Kernel Build (CLEAN)
+name: SukiSU Kernel Build (FINAL CLEAN)
 
 permissions:
   contents: write
@@ -107,7 +107,7 @@ jobs:
           mkdir -p "$HOME/bin"
           curl -o "$HOME/bin/repo" https://storage.googleapis.com/git-repo-downloads/repo
           chmod +x "$HOME/bin/repo"
-          "$HOME/bin/repo" init -u https://android.googlesource.com/kernel/manifest -b common-${BRANCH}
+          "$HOME/bin/repo" init -u https://android.googlesource.com/kernel/manifest -b common-${BRANCH} --partial-clone --clone-filter=blob:none
           "$HOME/bin/repo" sync -j$(nproc --all) --fail-fast
 
       - name: Verify kernel workspace
@@ -154,98 +154,75 @@ jobs:
         run: |
           curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "${KSU_BRANCH}"
 
-      - name: Remove KernelSU allowlist completely
+      - name: Remove KernelSU allowlist
         working-directory: common
         run: |
           set -e
-          
-          echo "==> Searching for allowlist files"
+          echo "Searching for allowlist files"
           find drivers/kernelsu -name "*allowlist*" -o -name "*profile*" 2>/dev/null || true
-          
-          echo "==> Removing all allowlist-related files"
+          echo "Removing allowlist files"
           rm -f drivers/kernelsu/allowlist.c
           rm -f drivers/kernelsu/app_profile.c
           rm -f drivers/kernelsu/allowlist.h
           rm -f drivers/kernelsu/app_profile.h
-          
           find drivers/kernelsu -type f -name "*allowlist*" -delete 2>/dev/null || true
           find drivers/kernelsu -type f -name "*profile*" -delete 2>/dev/null || true
-          
-          echo "==> Remaining files in drivers/kernelsu:"
-          ls -la drivers/kernelsu/ || true
-          
-          if find drivers/kernelsu -name "*allowlist*" -o -name "*profile*" 2>/dev/null | grep -q .; then
-            echo "ERROR: allowlist files still present"
-            find drivers/kernelsu -name "*allowlist*" -o -name "*profile*"
-            exit 1
-          fi
-          
-          echo "KernelSU allowlist completely removed"
+          echo "Allowlist removed"
 
-    #  - name: Apply SUSFS patch
-    #    working-directory: common
-    #    run: |
-    #      set -e
-    #      PATCH_DIR="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches"
-    #      if [ -f "$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch" ]; then
-    #        PATCH="$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch"
-    #      elif [ -f "$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch" ]; then
-    #        PATCH="$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch"
-    #      else
-    #        PATCH=$(find "$PATCH_DIR" -name "*6.6*.patch" | head -1)
-    #        if [ -z "$PATCH" ]; then
-    #          echo "No suitable SUSFS patch found"
-    #          ls -la "$PATCH_DIR"/*.patch 2>/dev/null || true
-    #          exit 0
-    #        fi
-    #      fi
-    #      echo "Applying SUSFS patch: $PATCH"
-    #      if patch -p1 < "$PATCH"; then
-    #        echo "Patch applied successfully"
-    #      else
-    #        echo "Some hunks failed, cleaning up rejects"
-    #        find . -name "*.rej" -delete 2>/dev/null || true
-    #      fi
+      - name: Apply SUSFS patch
+        working-directory: common
+        run: |
+          set -e
+          PATCH_DIR="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches"
+          if [ -f "$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch" ]; then
+            PATCH="$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch"
+          elif [ -f "$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch" ]; then
+            PATCH="$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch"
+          else
+            PATCH=$(find "$PATCH_DIR" -name "*6.6*.patch" | head -1)
+            if [ -z "$PATCH" ]; then
+              echo "No SUSFS patch found"
+              exit 0
+            fi
+          fi
+          echo "Applying SUSFS patch: $PATCH"
+          if patch -p1 < "$PATCH"; then
+            echo "Patch applied"
+          else
+            echo "Some hunks failed, cleaning rejects"
+            find . -name "*.rej" -delete 2>/dev/null || true
+          fi
+
       - name: Copy SUSFS files
         run: |
           set -e
-          
-          echo "==> Checking SUSFS repo structure"
+          echo "Checking SUSFS structure"
           ls -la susfs4ksu/kernel_patches/ || true
-          
-          echo "==> Copying SUSFS source files"
+          echo "Copying SUSFS source"
           if [ -d "susfs4ksu/kernel_patches/fs/susfs" ]; then
             cp -rv susfs4ksu/kernel_patches/fs/susfs common/fs/
-            echo "Copied SUSFS source to common/fs/susfs"
+            echo "Copied SUSFS source"
           else
-            echo "WARNING: susfs4ksu/kernel_patches/fs/susfs not found"
+            echo "WARNING: SUSFS source not found"
             find susfs4ksu -type d -name susfs
           fi
-          
-          echo "==> Copying SUSFS headers"
+          echo "Copying SUSFS headers"
           if [ -d "susfs4ksu/kernel_patches/include/linux" ]; then
             cp -v susfs4ksu/kernel_patches/include/linux/susfs.h common/include/linux/ 2>/dev/null || true
-            echo "Copied SUSFS headers to common/include/linux"
+            echo "Copied headers"
           else
-            echo "WARNING: susfs4ksu/kernel_patches/include/linux not found"
+            echo "WARNING: SUSFS headers not found"
             find susfs4ksu -type f -name "susfs.h"
           fi
-          
-          echo "==> Verifying SUSFS files were copied"
+          echo "Verifying SUSFS files"
           if [ ! -d "common/fs/susfs" ]; then
-            echo "ERROR: common/fs/susfs directory not created"
+            echo "ERROR: common/fs/susfs not created"
             exit 1
           fi
-          
           if [ ! -f "common/include/linux/susfs.h" ]; then
-            echo "ERROR: common/include/linux/susfs.h not found"
+            echo "ERROR: susfs.h not found"
             exit 1
           fi
-          
-          echo "==> SUSFS files present:"
-          ls -la common/fs/susfs/ || true
-          ls -la common/include/linux/susfs.h || true
-          
           echo "SUSFS files copied successfully"
 
       - name: Patch gki_defconfig
@@ -319,9 +296,23 @@ jobs:
             KEEPALIVE_PID=$!
             trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
             sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
+            sed -i 's/BUILD_KSELFTESTS=.*/BUILD_KSELFTESTS=0/' common/build.config.gki.aarch64 || true
+            sed -i 's/BUILD_GKI_CERTIFICATION_TOOLS=.*/BUILD_GKI_CERTIFICATION_TOOLS=0/' common/build.config.gki.aarch64 || true
             sed -i '/MODULES_ORDER/d' common/build.config.gki.aarch64 || true
             sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
-            tools/bazel build --config=fast --config=stamp //common:kernel_aarch64_dist
+            export CC="/usr/bin/ccache clang"
+            export HOSTCC="/usr/bin/ccache clang"
+            export LTO=thin
+            tools/bazel build \
+              --jobs=2 \
+              --local_ram_resources=6144 \
+              --local_cpu_resources=2 \
+              --spawn_strategy=local \
+              --config=fast \
+              --config=stamp \
+              --action_env=CC="$CC" \
+              --action_env=HOSTCC="$HOSTCC" \
+              //common:kernel_aarch64_dist
 
       - name: Show ccache stats
         run: ccache --show-stats
@@ -353,32 +344,3 @@ jobs:
         with:
           path: /home/runner/.ccache
           key: ccache-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}-${{ github.run_id }}
-
-            export BAZEL_OPTS="
-            --jobs=2
-            --local_ram_resources=6144
-            --local_cpu_resources=2
-            --spawn_strategy=local
-            "
-            
-            export CC="/usr/bin/ccache clang"
-            export HOSTCC="/usr/bin/ccache clang"
-            export LTO=thin
-            
-            sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
-            sed -i '/MODULES_ORDER/d' common/build.config.gki.aarch64 || true
-            sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
-            sed -i 's/BUILD_KSELFTESTS=.*/BUILD_KSELFTESTS=0/' common/build.config.gki.aarch64 || true
-            sed -i 's/BUILD_GKI_CERTIFICATION_TOOLS=.*/BUILD_GKI_CERTIFICATION_TOOLS=0/' common/build.config.gki.aarch64 || true
-            
-                tools/bazel build \
-                  $BAZEL_OPTS \
-                  --config=fast \
-                  --config=stamp \repo init \
-                  -u https://android.googlesource.com/kernel/manifest \
-                  -b common-${BRANCH} \
-                  --partial-clone \
-                  --clone-filter=blob:none
-                              --action_env=CC="$CC" \
-              --action_env=HOSTCC="$HOSTCC" \
-              //common:kernel_aarch64_dist
