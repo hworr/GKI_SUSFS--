@@ -1,0 +1,357 @@
+name: NetHunter Kernel Build (SukiSU + SUSFS)
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      android_version:
+        description: 'Android Version'
+        required: true
+        type: choice
+        options:
+          - '14'
+          - '15'
+        default: '15'
+      kernel_version:
+        description: 'Kernel Version'
+        required: true
+        type: choice
+        options:
+          - '5.15'
+          - '6.1'
+          - '6.6'
+        default: '6.6'
+      os_patch_level:
+        description: 'OS Patch Level (YYYY-MM)'
+        required: true
+        type: string
+        default: '2025-09'
+      kernelsu_branch:
+        description: 'KernelSU Branch'
+        required: true
+        type: choice
+        options:
+          - 'builtin'
+          - 'main'
+        default: 'builtin'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      CCACHE_DIR: /home/runner/.ccache
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+      CCACHE_CPP2: "yes"
+      ANDROID_VERSION: ${{ inputs.android_version }}
+      KERNEL_VERSION: ${{ inputs.kernel_version }}
+      OS_PATCH_LEVEL: ${{ inputs.os_patch_level }}
+      KERNELSU_BRANCH: ${{ inputs.kernelsu_branch }}
+
+    steps:
+      - name: Set GKI branch
+        run: |
+          set -e
+          BRANCH="android${ANDROID_VERSION}-${KERNEL_VERSION}-${OS_PATCH_LEVEL}"
+          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+          echo "Using branch: common-$BRANCH"
+
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y git curl python3 ccache clang lld llvm bc bison flex libelf-dev libssl-dev
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-nethunter-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}
+          restore-keys: |
+            ccache-nethunter-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-
+            ccache-nethunter-${{ env.ANDROID_VERSION }}-
+            ccache-nethunter-
+
+      - name: Setup ccache
+        run: |
+          ccache --max-size=20G
+          ccache --set-config=compression=true
+          ccache --zero-stats
+
+      - name: Init and sync kernel repo
+        run: |
+          set -e
+          mkdir -p "$HOME/bin"
+          curl -o "$HOME/bin/repo" https://storage.googleapis.com/git-repo-downloads/repo
+          chmod +x "$HOME/bin/repo"
+          "$HOME/bin/repo" init -u https://android.googlesource.com/kernel/manifest -b common-${BRANCH}
+          "$HOME/bin/repo" sync -j$(nproc --all) --fail-fast
+
+      - name: Verify kernel workspace
+        run: |
+          set -e
+          test -d common || { echo "common/ not found"; exit 1; }
+          test -d .repo || { echo ".repo/ not found"; exit 1; }
+          echo "Kernel workspace OK"
+
+      - name: Remove Baseband-Guard
+        working-directory: common
+        run: |
+          rm -rf security/baseband-guard || true
+          sed -i '/baseband_guard/d' security/Kconfig || true
+          sed -i '/CONFIG_BBG/d' arch/arm64/configs/gki_defconfig || true
+
+      - name: Clone SUSFS and AnyKernel3
+        run: |
+          set -e
+          SUSFS_BRANCH="gki-android${ANDROID_VERSION}-${KERNEL_VERSION}"
+          echo "Attempting to clone SUSFS branch: $SUSFS_BRANCH"
+          if ! git clone https://github.com/ShirkNeko/susfs4ksu.git -b "$SUSFS_BRANCH" 2>/dev/null; then
+            echo "Branch $SUSFS_BRANCH not found, trying alternatives"
+            SUSFS_BRANCH_ALT="gki-${ANDROID_VERSION}-${KERNEL_VERSION}"
+            if ! git clone https://github.com/ShirkNeko/susfs4ksu.git -b "$SUSFS_BRANCH_ALT" 2>/dev/null; then
+              echo "Using default branch"
+              git clone https://github.com/ShirkNeko/susfs4ksu.git
+            fi
+          fi
+          git clone https://github.com/MiRinChan/AnyKernel3.git
+
+      - name: Add SukiSU
+        run: |
+          curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "${KERNELSU_BRANCH}"
+
+      - name: Remove KernelSU allowlist completely
+        working-directory: common
+        run: |
+          set -e
+          
+          echo "==> Searching for allowlist files"
+          find drivers/kernelsu -name "*allowlist*" -o -name "*profile*" 2>/dev/null || true
+          
+          echo "==> Removing all allowlist-related files"
+          rm -f drivers/kernelsu/allowlist.c
+          rm -f drivers/kernelsu/app_profile.c
+          rm -f drivers/kernelsu/allowlist.h
+          rm -f drivers/kernelsu/app_profile.h
+          
+          find drivers/kernelsu -type f -name "*allowlist*" -delete 2>/dev/null || true
+          find drivers/kernelsu -type f -name "*profile*" -delete 2>/dev/null || true
+          
+          echo "==> Remaining files in drivers/kernelsu:"
+          ls -la drivers/kernelsu/ || true
+          
+          if find drivers/kernelsu -name "*allowlist*" -o -name "*profile*" 2>/dev/null | grep -q .; then
+            echo "ERROR: allowlist files still present"
+            find drivers/kernelsu -name "*allowlist*" -o -name "*profile*"
+            exit 1
+          fi
+          
+          echo "KernelSU allowlist completely removed"
+
+      - name: Apply SUSFS patch
+        working-directory: common
+        run: |
+          set -e
+          PATCH_DIR="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches"
+          if [ -f "$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch" ]; then
+            PATCH="$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch"
+          elif [ -f "$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch" ]; then
+            PATCH="$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch"
+          else
+            PATCH=$(find "$PATCH_DIR" -name "*6.6*.patch" | head -1)
+            if [ -z "$PATCH" ]; then
+              echo "No suitable SUSFS patch found"
+              ls -la "$PATCH_DIR"/*.patch 2>/dev/null || true
+              exit 0
+            fi
+          fi
+          echo "Applying SUSFS patch: $PATCH"
+          if patch -p1 < "$PATCH"; then
+            echo "Patch applied successfully"
+          else
+            echo "Some hunks failed, cleaning up rejects"
+            find . -name "*.rej" -delete 2>/dev/null || true
+          fi
+
+      - name: Copy SUSFS files
+        run: |
+          set -e
+          
+          echo "==> Checking SUSFS repo structure"
+          ls -la susfs4ksu/kernel_patches/ || true
+          
+          echo "==> Copying SUSFS source files"
+          if [ -d "susfs4ksu/kernel_patches/fs/susfs" ]; then
+            cp -rv susfs4ksu/kernel_patches/fs/susfs common/fs/
+            echo "Copied SUSFS source to common/fs/susfs"
+          else
+            echo "WARNING: susfs4ksu/kernel_patches/fs/susfs not found"
+            find susfs4ksu -type d -name susfs
+          fi
+          
+          echo "==> Copying SUSFS headers"
+          if [ -d "susfs4ksu/kernel_patches/include/linux" ]; then
+            cp -v susfs4ksu/kernel_patches/include/linux/susfs.h common/include/linux/ 2>/dev/null || true
+            echo "Copied SUSFS headers to common/include/linux"
+          else
+            echo "WARNING: susfs4ksu/kernel_patches/include/linux not found"
+            find susfs4ksu -type f -name "susfs.h"
+          fi
+          
+          echo "==> Verifying SUSFS files were copied"
+          if [ ! -d "common/fs/susfs" ]; then
+            echo "ERROR: common/fs/susfs directory not created"
+            exit 1
+          fi
+          
+          if [ ! -f "common/include/linux/susfs.h" ]; then
+            echo "ERROR: common/include/linux/susfs.h not found"
+            exit 1
+          fi
+          
+          echo "==> SUSFS files present:"
+          ls -la common/fs/susfs/ || true
+          ls -la common/include/linux/susfs.h || true
+          
+          echo "SUSFS files copied successfully"
+
+      - name: Patch gki_defconfig
+        working-directory: common
+        run: |
+          set -e
+          DEFCONFIG=arch/arm64/configs/gki_defconfig
+          sed -i '/^CONFIG_KSU/d' "$DEFCONFIG"
+          sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
+          sed -i '/^CONFIG_USB_GADGET/d' "$DEFCONFIG"
+          sed -i '/^CONFIG_TCP_CONG_BBR/d' "$DEFCONFIG"
+          sed -i '/^CONFIG_IP_SET/d' "$DEFCONFIG"
+          cat >> "$DEFCONFIG" << 'EOF'
+          
+          CONFIG_KSU=y
+          CONFIG_KSU_MANUAL_HOOK=y
+          CONFIG_KSU_KPROBES_HOOK=n
+          CONFIG_SUSFS=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_SUSFS_PROC=y
+          CONFIG_SUSFS_MAGIC_MOUNT=y
+          CONFIG_SUSFS_AUTO_BIND=y
+          CONFIG_SUSFS_SUS_PATH=y
+          CONFIG_CFG80211=m
+          CONFIG_MAC80211=m
+          CONFIG_USB_GADGET=y
+          CONFIG_USB_CONFIGFS=y
+          CONFIG_USB_NET_DRIVERS=y
+          CONFIG_USB_RNDIS_HOST=m
+          CONFIG_USB_NET_CDC_ECM=m
+          CONFIG_USB_NET_CDC_NCM=m
+          CONFIG_USB_HID=m
+          CONFIG_USB_HIDDEV=y
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          CONFIG_TCP_CONG_BBR=y
+          CONFIG_NET_SCH_FQ=y
+          CONFIG_DEFAULT_BBR=y
+          CONFIG_TCP_CONG_ADVANCED=y
+          CONFIG_TCP_CONG_BIC=n
+          CONFIG_TCP_CONG_WESTWOOD=n
+          CONFIG_TCP_CONG_HTCP=n
+          CONFIG_IP_NF_TARGET_TTL=y
+          CONFIG_IP6_NF_TARGET_HL=y
+          CONFIG_IP6_NF_MATCH_HL=y
+          CONFIG_IP_SET=y
+          CONFIG_IP_SET_MAX=65534
+          CONFIG_IP_SET_BITMAP_IP=y
+          CONFIG_IP_SET_BITMAP_IPMAC=y
+          CONFIG_IP_SET_BITMAP_PORT=y
+          CONFIG_IP_SET_HASH_IP=y
+          CONFIG_IP_SET_HASH_IPMARK=y
+          CONFIG_IP_SET_HASH_IPPORT=y
+          CONFIG_IP_SET_HASH_IPPORTIP=y
+          CONFIG_IP_SET_HASH_IPPORTNET=y
+          CONFIG_IP_SET_HASH_IPMAC=y
+          CONFIG_IP_SET_HASH_MAC=y
+          CONFIG_IP_SET_HASH_NETPORTNET=y
+          CONFIG_IP_SET_HASH_NET=y
+          CONFIG_IP_SET_HASH_NETNET=y
+          CONFIG_IP_SET_HASH_NETPORT=y
+          CONFIG_IP_SET_HASH_NETIFACE=y
+          CONFIG_IP_SET_LIST_SET=y
+          EOF
+          echo "Defconfig patched with NetHunter features"
+
+      - name: Disable defconfig validation
+        working-directory: common
+        run: |
+          sed -i 's/POST_DEFCONFIG_CMDS=.*/POST_DEFCONFIG_CMDS=""/g' build.config.gki.aarch64 || true
+          sed -i 's/PRE_DEFCONFIG_CMDS=.*/PRE_DEFCONFIG_CMDS=""/g' build.config.gki.aarch64 || true
+          echo "Validation disabled"
+
+      - name: Pre-sort defconfig for Bazel
+        working-directory: common
+        run: |
+          set -e
+          echo "Pre-sorting defconfig"
+          make ARCH=arm64 gki_defconfig
+          make ARCH=arm64 savedefconfig
+          cp defconfig arch/arm64/configs/gki_defconfig
+          echo "Defconfig pre-sorted"
+
+      - name: Clean kernel tree for Bazel
+        working-directory: common
+        run: |
+          make mrproper
+          echo "Kernel tree cleaned"
+
+      - name: Build kernel with Bazel
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 90
+          max_attempts: 2
+          retry_on: timeout
+          command: |
+            cd "$GITHUB_WORKSPACE"
+            ( while sleep 300; do echo "[keepalive] $(date -u)"; done ) &
+            KEEPALIVE_PID=$!
+            trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
+            sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
+            sed -i '/MODULES_ORDER/d' common/build.config.gki.aarch64 || true
+            sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
+            tools/bazel build --config=fast --config=stamp //common:kernel_aarch64_dist
+
+      - name: Show ccache stats
+        run: ccache --show-stats
+
+      - name: Package AnyKernel3
+        run: |
+          set -e
+          IMG=$(find bazel-bin -name Image 2>/dev/null | head -1)
+          if [ ! -f "$IMG" ]; then
+            IMG=$(find out -name Image 2>/dev/null | head -1)
+          fi
+          test -f "$IMG" || { echo "ERROR: Image not found"; exit 1; }
+          echo "Using: $IMG"
+          cp "$IMG" AnyKernel3/Image
+          mkdir -p AnyKernel3/modules/vendor/lib/modules
+          find bazel-bin out -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
+          cd AnyKernel3
+          zip -r ../nethunter-kernel.zip .
+          echo "Packaged"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nethunter-kernel
+          path: nethunter-kernel.zip
+
+      - name: Save ccache
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-nethunter-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}-${{ github.run_id }}
