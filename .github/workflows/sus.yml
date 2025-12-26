@@ -238,6 +238,11 @@ jobs:
         CONFIG_TCP_CONG_BBR=y
         CONFIG_NET_SCH_FQ=y
         CONFIG_DEFAULT_BBR=y
+        
+        # SELinux required defaults (GKI)
+        CONFIG_SECURITY_SELINUX=y
+        CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS=8
+        CONFIG_SECURITY_SELINUX_SID2STR_CACHE_SIZE=0
         EOF
     
         "$MERGE" -m "$DEFCONFIG" /tmp/gki_nethunter.config
