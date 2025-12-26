@@ -362,18 +362,30 @@ jobs:
           find common -name "*.c" -o -name "*.h" | xargs sed -i \
             's|#include <security/selinux/include/security.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n&\n#endif|g' || true
 
-      - name: Prepare defconfig
+      - name: Prepare defconfig and clean tree
         working-directory: common
         run: |
+          set -e
+          
+          # Remove baseband-guard
           rm -rf security/baseband-guard || true
           sed -i '/baseband_guard/d' security/Kconfig || true
+          
+          # CRITICAL: Clean tree BEFORE config generation
+          echo "==> Cleaning tree BEFORE config"
+          make mrproper || true
+          
+          echo "✓ Tree prepared and cleaned"
 
       - name: Create config fragment
         run: |
-          cat > /tmp/gki_nethunter.config << 'EOF'
+          cat > /tmp/kernelsu_susfs.config << 'EOF'
+          # KernelSU Core
           CONFIG_KSU=y
           CONFIG_KSU_MANUAL_HOOK=y
           CONFIG_KSU_KPROBES_HOOK=n
+          
+          # SUSFS Integration
           CONFIG_SUSFS=y
           CONFIG_KSU_SUSFS=y
           CONFIG_SUSFS_PROC=y
@@ -381,49 +393,17 @@ jobs:
           CONFIG_SUSFS_AUTO_BIND=y
           CONFIG_SUSFS_SUS_PATH=y
           CONFIG_KSU_SUSFS_SUS_SU=n
+          
+          # WiFi/Bluetooth Modules
           CONFIG_CFG80211=m
           CONFIG_MAC80211=m
-          CONFIG_USB_GADGET=y
-          CONFIG_USB_CONFIGFS=y
-          CONFIG_USB_NET_DRIVERS=y
-          CONFIG_USB_RNDIS_HOST=m
-          CONFIG_USB_NET_CDC_ECM=m
-          CONFIG_USB_NET_CDC_NCM=m
-          CONFIG_USB_HID=m
-          CONFIG_USB_HIDDEV=y
+          
+          # Basic filesystem support
           CONFIG_TMPFS_XATTR=y
           CONFIG_TMPFS_POSIX_ACL=y
-          CONFIG_TCP_CONG_BBR=y
-          CONFIG_NET_SCH_FQ=y
-          CONFIG_DEFAULT_BBR=y
-          CONFIG_TCP_CONG_ADVANCED=y
-          CONFIG_TCP_CONG_BIC=n
-          CONFIG_TCP_CONG_WESTWOOD=n
-          CONFIG_TCP_CONG_HTCP=n
-          CONFIG_IP_NF_TARGET_TTL=y
-          CONFIG_IP6_NF_TARGET_HL=y
-          CONFIG_IP6_NF_MATCH_HL=y
-          CONFIG_IP_SET=y
-          CONFIG_IP_SET_MAX=65534
-          CONFIG_IP_SET_BITMAP_IP=y
-          CONFIG_IP_SET_BITMAP_IPMAC=y
-          CONFIG_IP_SET_BITMAP_PORT=y
-          CONFIG_IP_SET_HASH_IP=y
-          CONFIG_IP_SET_HASH_IPMARK=y
-          CONFIG_IP_SET_HASH_IPPORT=y
-          CONFIG_IP_SET_HASH_IPPORTIP=y
-          CONFIG_IP_SET_HASH_IPPORTNET=y
-          CONFIG_IP_SET_HASH_IPMAC=y
-          CONFIG_IP_SET_HASH_MAC=y
-          CONFIG_IP_SET_HASH_NETPORTNET=y
-          CONFIG_IP_SET_HASH_NET=y
-          CONFIG_IP_SET_HASH_NETNET=y
-          CONFIG_IP_SET_HASH_NETPORT=y
-          CONFIG_IP_SET_HASH_NETIFACE=y
-          CONFIG_IP_SET_LIST_SET=y
           EOF
           
-          echo "✓ Created NetHunter config"
+          echo "✓ Created KernelSU + SUSFS config"
 
       - name: Build config (WITHOUT savedefconfig)
         working-directory: common
@@ -432,19 +412,19 @@ jobs:
           echo "==> Building config WITHOUT savedefconfig"
           
           make ARCH=arm64 gki_defconfig
-          ./scripts/kconfig/merge_config.sh -m .config /tmp/gki_nethunter.config
+          ./scripts/kconfig/merge_config.sh -m .config /tmp/kernelsu_susfs.config
           
           if grep -q "CONFIG_SUSFS=y" .config; then
-            echo "✓ SUSFS enabled"
+            echo "✓ SUSFS enabled in .config"
           else
-            echo "⚠️ Forcing SUSFS"
+            echo "⚠️ Forcing SUSFS in .config"
             echo "CONFIG_SUSFS=y" >> .config
             echo "CONFIG_KSU_SUSFS=y" >> .config
           fi
           
-          echo "✓ Config ready (no savedefconfig)"
+          echo "✓ Config ready (savedefconfig skipped)"
 
-      - name: Disable defconfig validation
+      - name: Disable defconfig validation completely
         working-directory: common
         run: |
           set -e
@@ -460,13 +440,7 @@ jobs:
             sed -i 's/"check_defconfig": True/"check_defconfig": False/g' build/kernel/kleaf/impl/kernel_config.bzl || true
           fi
           
-          echo "✓ Validation disabled"
-
-      - name: Clean tree
-        working-directory: common
-        run: |
-          make mrproper || true
-          echo "✓ Tree cleaned"
+          echo "✓ Defconfig validation completely disabled"
 
       - name: Build kernel
         uses: nick-fields/retry@v3
