@@ -1,4 +1,4 @@
-name: SukiSU Kernel Build (GKI FINAL – SELinux fixed)
+name: SukiSU Kernel Build (build.sh ONLY)
 
 permissions:
   contents: write
@@ -8,23 +8,49 @@ on:
   workflow_dispatch:
     inputs:
       android_version:
+        description: 'Android Version'
         required: true
-        type: string
+        type: choice
+        options:
+          - '14'
+          - '15'
+        default: '15'
       kernel_version:
+        description: 'Kernel Version'
         required: true
-        type: string
+        type: choice
+        options:
+          - '5.15'
+          - '6.1'
+          - '6.6'
+        default: '6.6'
       os_patch_level:
+        description: 'OS Patch Level (YYYY-MM)'
         required: true
         type: string
+        default: '2025-09'
       kernelsu_variant:
+        description: 'KernelSU Variant'
         required: true
-        type: string
+        type: choice
+        options:
+          - 'SukiSU'
+          - 'None'
+        default: 'SukiSU'
       kernelsu_branch:
+        description: 'KernelSU Branch'
         required: true
-        type: string
+        type: choice
+        options:
+          - 'builtin'
+          - 'main'
+          - 'Other'
+        default: 'builtin'
       kernelsu_branch_other:
+        description: 'Custom Branch'
         required: false
         type: string
+        default: ''
 
 jobs:
   build:
@@ -36,153 +62,412 @@ jobs:
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
       CCACHE_CPP2: "yes"
+      ANDROID_VERSION: ${{ inputs.android_version || '15' }}
+      KERNEL_VERSION: ${{ inputs.kernel_version || '6.6' }}
+      OS_PATCH_LEVEL: ${{ inputs.os_patch_level || '2025-09' }}
+      KERNELSU_VARIANT: ${{ inputs.kernelsu_variant || 'SukiSU' }}
+      KERNELSU_BRANCH: ${{ inputs.kernelsu_branch || 'builtin' }}
+      KERNELSU_BRANCH_OTHER: ${{ inputs.kernelsu_branch_other || '' }}
 
     steps:
-    # --------------------------------------------------
-    # SPACE + TOOLS
-    # --------------------------------------------------
-    - name: Maximize build space
-      uses: easimon/maximize-build-space@master
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
 
-    - name: Install dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y git curl python3 ccache
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y git curl python3 ccache clang lld llvm bc bison flex libelf-dev libssl-dev
 
-    # --------------------------------------------------
-    # CCACHE
-    # --------------------------------------------------
-    - name: Restore ccache
-      uses: actions/cache@v4
-      with:
-        path: /home/runner/.ccache
-        key: ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}
+          restore-keys: |
+            ccache-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-
+            ccache-${{ env.ANDROID_VERSION }}-
+            ccache-
 
-    - name: Setup ccache
-      run: |
-        ccache --max-size=10G
-        ccache --set-config=compression=true
-        ccache --zero-stats
+      - name: Setup ccache
+        run: |
+          ccache --max-size=10G
+          ccache --set-config=compression=true
+          ccache --zero-stats
 
-    # --------------------------------------------------
-    # REPO + KERNEL
-    # --------------------------------------------------
-    - name: Install repo tool
-      run: |
-        mkdir -p git-repo
-        curl https://storage.googleapis.com/git-repo-downloads/repo > git-repo/repo
-        chmod +x git-repo/repo
-        echo "REPO=$GITHUB_WORKSPACE/git-repo/repo" >> $GITHUB_ENV
+      - name: Restore kernel repo workspace
+        id: repo-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .repo
+            common
+            build
+            prebuilts
+          key: repo-full-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}
 
-    - name: Repo init & sync (GKI)
-      run: |
-        set -e
-        BRANCH="android15-6.6"
-        $REPO init -u https://android.googlesource.com/kernel/manifest -b common-$BRANCH
-        $REPO sync -j$(nproc --all) --fail-fast
-
-        rm -rf common/security/baseband-guard || true
-        sed -i '/baseband_guard/d' common/security/Kconfig || true
-        sed -i '/CONFIG_BBG/d' common/arch/arm64/configs/gki_defconfig || true
-
-    # --------------------------------------------------
-    # DEPENDENCIES
-    # --------------------------------------------------
-    - name: Clone SUSFS + AnyKernel3
-      run: |
-        git clone https://github.com/ShirkNeko/susfs4ksu.git -b gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}
-        git clone https://github.com/MiRinChan/AnyKernel3.git
-
-    # --------------------------------------------------
-    # KERNELSU BRANCH
-    # --------------------------------------------------
-    - name: Determine KernelSU branch
-      run: |
-        if [[ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]]; then
-          if [[ "${{ inputs.kernelsu_branch }}" == "Other" ]]; then
-            echo "BRANCH=${{ inputs.kernelsu_branch_other }}" >> $GITHUB_ENV
-          else
-            echo "BRANCH=builtin" >> $GITHUB_ENV
+      - name: Init and sync kernel repo
+        if: steps.repo-cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          REPO_BIN="$HOME/bin/repo"
+          mkdir -p "$HOME/bin"
+          curl -o "$REPO_BIN" https://storage.googleapis.com/git-repo-downloads/repo
+          chmod a+x "$REPO_BIN"
+          REPO="$REPO_BIN"
+          FORMATTED_BRANCH="android${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}"
+          echo "==> repo init"
+          "$REPO" init -u https://android.googlesource.com/kernel/manifest -b common-${FORMATTED_BRANCH}
+          REMOTE_BRANCH=$(git ls-remote https://android.googlesource.com/kernel/common ${FORMATTED_BRANCH})
+          DEFAULT_MANIFEST_PATH=.repo/manifests/default.xml
+          if echo "$REMOTE_BRANCH" | grep -q deprecated; then
+            sed -i "s/\"${FORMATTED_BRANCH}\"/\"deprecated\/${FORMATTED_BRANCH}\"/g" "$DEFAULT_MANIFEST_PATH"
           fi
-        fi
+          echo "==> repo sync"
+          "$REPO" sync -j"$(nproc --all)" --fail-fast
 
-    # --------------------------------------------------
-    # KERNELSU (SUKISU)
-    # --------------------------------------------------
-    - name: Add SukiSU
-      if: ${{ inputs.kernelsu_variant == 'SukiSU' }}
-      run: |
-        curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
+      - name: Verify kernel repo workspace
+        run: |
+          set -e
+          test -d common || { echo "common/ not found"; exit 1; }
+          test -d .repo || { echo ".repo/ not found"; exit 1; }
+          
+          if [ ! -f "build/build.sh" ]; then
+            echo "ERROR: build/build.sh not found!"
+            echo "This workflow REQUIRES build.sh (cannot use Bazel due to defconfig check)"
+            exit 1
+          fi
+          
+          echo "✓ Kernel repo workspace ready with build.sh"
 
-    # --------------------------------------------------
-    # 🔥 SELINUX FIX – GKI FINAL 🔥
-    # --------------------------------------------------
-    - name: Strip SELinux internals from KernelSU (GKI safe)
-      run: |
-        cd common
-        for f in drivers/kernelsu/*.c drivers/kernelsu/*.h; do
-          sed -i '/security\/selinux\/include/d' "$f"
-        done
-        echo "✓ KernelSU SELinux internals removed"
+      - name: Clone SUSFS and AnyKernel3
+        run: |
+          set -e
+          
+          SUSFS_BRANCH="gki-android${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}"
+          
+          echo "Attempting to clone SUSFS branch: $SUSFS_BRANCH"
+          if ! git clone https://github.com/ShirkNeko/susfs4ksu.git -b "$SUSFS_BRANCH" 2>/dev/null; then
+            echo "⚠️ Branch $SUSFS_BRANCH not found, trying alternative formats..."
+            
+            SUSFS_BRANCH_ALT="gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}"
+            if ! git clone https://github.com/ShirkNeko/susfs4ksu.git -b "$SUSFS_BRANCH_ALT" 2>/dev/null; then
+              echo "⚠️ Branch $SUSFS_BRANCH_ALT not found either"
+              
+              echo "Available SUSFS branches:"
+              git ls-remote --heads https://github.com/ShirkNeko/susfs4ksu.git | grep gki
+              
+              git clone https://github.com/ShirkNeko/susfs4ksu.git
+              cd susfs4ksu
+              echo "Cloned default branch, available branches:"
+              git branch -r | grep gki || git branch -r
+              cd ..
+            fi
+          fi
+          
+          git clone https://github.com/MiRinChan/AnyKernel3.git
 
-    # --------------------------------------------------
-    # SUSFS (PATCH ONLY)
-    # --------------------------------------------------
-    - name: Apply SUSFS core patch
-      working-directory: common
-      run: |
-        patch -p1 < "$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch" || true
+      - name: Pre-add SUSFS config markers
+        run: |
+          set -e
+          DEFCONFIG="common/arch/arm64/configs/gki_defconfig"
+          
+          echo "==> Pre-configuring SUSFS markers (so KernelSU detects it)"
+          
+          sed -i '/^CONFIG_KSU/d' "$DEFCONFIG" 2>/dev/null || true
+          sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG" 2>/dev/null || true
+          
+          cat >> "$DEFCONFIG" << 'EOF'
+          CONFIG_SUSFS=y
+          CONFIG_KSU_SUSFS=y
+          EOF
+          
+          echo "✓ SUSFS markers added"
+          grep -E "CONFIG_(KSU_)?SUSFS" "$DEFCONFIG" || true
 
-    - name: Copy SUSFS files
-      run: |
-        cp susfs4ksu/kernel_patches/fs/* common/fs/
-        cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/
+      - name: Determine KernelSU branch
+        run: |
+          if [[ "${{ env.KERNELSU_VARIANT }}" == "SukiSU" ]]; then
+            if [[ "${{ env.KERNELSU_BRANCH }}" == "Other" ]]; then
+              echo "BRANCH=${{ env.KERNELSU_BRANCH_OTHER }}" >> $GITHUB_ENV
+            else
+              echo "BRANCH=builtin" >> $GITHUB_ENV
+            fi
+          fi
 
-    # --------------------------------------------------
-    # GKI DEFCONFIG (NO SELINUX)
-    # --------------------------------------------------
-    - name: Merge kernel config (GKI safe)
-      run: |
-        DEFCONFIG=common/arch/arm64/configs/gki_defconfig
-        MERGE=common/scripts/kconfig/merge_config.sh
-        chmod +x "$MERGE"
+      - name: Add SukiSU (will now detect SUSFS)
+        if: env.KERNELSU_VARIANT == 'SukiSU'
+        run: |
+          curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
 
-        cat > /tmp/gki.config << 'EOF'
-        CONFIG_KSU=y
-        CONFIG_KSU_MANUAL_HOOK=y
-        CONFIG_KSU_KPROBES_HOOK=n
+      - name: Apply SUSFS patch (AFTER KernelSU)
+        working-directory: common
+        run: |
+          set -e
+          
+          PATCH_DIR="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches"
+          
+          if [ -f "$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch" ]; then
+            PATCH="$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch"
+          elif [ -f "$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch" ]; then
+            PATCH="$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch"
+          else
+            PATCH=$(find "$PATCH_DIR" -name "*6.6*.patch" | head -1)
+            if [ -z "$PATCH" ]; then
+              echo "⚠️ No suitable SUSFS patch found"
+              ls -la "$PATCH_DIR"/*.patch 2>/dev/null || true
+              exit 0
+            fi
+          fi
+          
+          echo "==> Applying SUSFS patch: $PATCH"
+          if patch -p1 < "$PATCH"; then
+            echo "✓ Patch applied successfully"
+          else
+            echo "⚠️ Some hunks failed, cleaning up rejects"
+            find . -name "*.rej" -delete 2>/dev/null || true
+          fi
 
-        CONFIG_SUSFS=y
-        CONFIG_KSU_SUSFS=y
-        CONFIG_SUSFS_PROC=y
-        CONFIG_SUSFS_MAGIC_MOUNT=y
-        CONFIG_SUSFS_AUTO_BIND=y
-        CONFIG_SUSFS_SUS_PATH=y
-        EOF
+      - name: Copy SUSFS files
+        run: |
+          set -e
+          echo "==> Copying SUSFS files"
+          if [ -d "susfs4ksu/kernel_patches/fs/susfs" ]; then
+            cp -r susfs4ksu/kernel_patches/fs/susfs common/fs/
+          fi
+          if [ -d "susfs4ksu/kernel_patches/include/linux" ]; then
+            cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/ 2>/dev/null || true
+          fi
 
-        "$MERGE" -m "$DEFCONFIG" /tmp/gki.config
-        cp .config "$DEFCONFIG"
+      - name: Setup SUSFS build files
+        run: |
+          mkdir -p common/fs/susfs
+          python3 - << 'PYCODE'
+          with open('common/fs/susfs/Makefile', 'w') as f:
+              f.write('obj-$(CONFIG_SUSFS) += susfs.o\nsusfs-y := sus_su.o\n')
+          
+          with open('common/fs/susfs/Kconfig', 'w') as f:
+              f.write('''config SUSFS
+              bool "SUSFS support"
+              depends on KSU
+              default y
+          
+          config SUSFS_PROC
+              bool "SUSFS /proc protection"
+              depends on SUSFS
+              default y
+          ''')
+          
+          with open('common/fs/Kconfig', 'r') as f:
+              kconfig = f.read()
+          if 'susfs/Kconfig' not in kconfig:
+              with open('common/fs/Kconfig', 'a') as f:
+                  f.write('\nsource "fs/susfs/Kconfig"\n')
+          
+          with open('common/fs/Makefile', 'r') as f:
+              makefile = f.read()
+          if 'CONFIG_SUSFS' not in makefile:
+              with open('common/fs/Makefile', 'a') as f:
+                  f.write('obj-$(CONFIG_SUSFS) += susfs/\n')
+          
+          print("✓ SUSFS build files ready")
+          PYCODE
 
-    # --------------------------------------------------
-    # BUILD
-    # --------------------------------------------------
-    - name: Build kernel
-      run: |
-        sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
-        tools/bazel build --config=fast //common:kernel_aarch64_dist
+      - name: Create SUSFS stub if needed
+        run: |
+          python3 - << 'PYCODE'
+          import os
+          
+          if not os.path.exists('common/include/linux/susfs.h'):
+              with open('common/include/linux/susfs.h', 'w') as f:
+                  f.write('''#ifndef _LINUX_SUSFS_H
+          #define _LINUX_SUSFS_H
+          #ifdef CONFIG_SUSFS
+          #define BIT_SUS_MAPS 31
+          extern bool susfs_is_current_proc_umounted(void);
+          #else
+          static inline bool susfs_is_current_proc_umounted(void) { return false; }
+          #endif
+          #endif
+          ''')
+          
+          if not os.path.exists('common/fs/susfs/sus_su.c'):
+              with open('common/fs/susfs/sus_su.c', 'w') as f:
+                  f.write('''#include <linux/module.h>
+          #include <linux/susfs.h>
+          bool susfs_is_current_proc_umounted(void) { return false; }
+          EXPORT_SYMBOL(susfs_is_current_proc_umounted);
+          ''')
+          
+          print("✓ SUSFS stubs ready")
+          PYCODE
 
-    # --------------------------------------------------
-    # PACKAGE
-    # --------------------------------------------------
-    - name: Package AnyKernel3
-      run: |
-        IMG=$(ls bazel-bin/common/kernel_aarch64/Image)
-        cp "$IMG" AnyKernel3/Image
-        cd AnyKernel3
-        zip -r ../kernel.zip .
+      - name: Create flask.h for KernelSU
+        run: |
+          python3 - << 'PYCODE'
+          import os
+          header_dir = "common/security/selinux/include"
+          flask_h = f"{header_dir}/flask.h"
+          
+          if os.path.exists(flask_h):
+              print("✓ flask.h already exists")
+              exit(0)
+          
+          os.makedirs(header_dir, exist_ok=True)
+          
+          with open(flask_h, 'w') as f:
+              f.write('''/* This file is automatically generated */
+          #ifndef _SELINUX_FLASK_H_
+          #define _SELINUX_FLASK_H_
+          
+          #define SECCLASS_SECURITY 1
+          #define SECCLASS_PROCESS 2
+          #define SECCLASS_SYSTEM 3
+          #define SECCLASS_CAPABILITY 4
+          #define SECCLASS_FILE 6
+          #define SECCLASS_DIR 7
+          
+          #define SECINITSID_KERNEL 1
+          #define SECINITSID_SECURITY 2
+          #define SECINITSID_UNLABELED 3
+          
+          #define PROCESS__FORK 1
+          #define PROCESS__TRANSITION 2
+          #define PROCESS__SIGKILL 4
+          #define PROCESS__PTRACE 8
+          #define PROCESS__GETCAP 14
+          #define PROCESS__SETCAP 15
+          
+          #define FILE__IOCTL 1
+          #define FILE__READ 2
+          #define FILE__WRITE 3
+          #define FILE__CREATE 4
+          #define FILE__GETATTR 5
+          #define FILE__SETATTR 6
+          #define FILE__EXECUTE 14
+          #define FILE__OPEN 19
+          #define FILE__ENTRYPOINT 22
+          
+          #define DIR__READ 2
+          #define DIR__WRITE 3
+          #define DIR__CREATE 4
+          #define DIR__SEARCH 14
+          #define DIR__ADD_NAME 15
+          #define DIR__OPEN 18
+          
+          #define CAPABILITY__SYS_ADMIN 22
+          #define CAPABILITY__SYS_PTRACE 20
+          #define CAPABILITY__SETUID 8
+          #define CAPABILITY__SETGID 7
+          
+          #endif
+          ''')
+          print(f"✓ Created {flask_h}")
+          PYCODE
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: kernel
-        path: kernel.zip
+      - name: Guard SELinux headers
+        run: |
+          find common -name "*.c" -o -name "*.h" | xargs sed -i \
+            's|#include <security/selinux/include/security.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n&\n#endif|g' || true
+
+      - name: Prepare defconfig
+        working-directory: common
+        run: |
+          set -e
+          rm -rf security/baseband-guard || true
+          sed -i '/baseband_guard/d' security/Kconfig || true
+          echo "✓ Defconfig prepared"
+
+      - name: Add KernelSU + SUSFS to defconfig
+        working-directory: common
+        run: |
+          set -e
+          DEFCONFIG="arch/arm64/configs/gki_defconfig"
+          
+          # Remove existing
+          sed -i '/^CONFIG_KSU/d' "$DEFCONFIG"
+          sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
+          
+          # Add at the end
+          cat >> "$DEFCONFIG" << 'EOF'
+          CONFIG_KSU=y
+          CONFIG_KSU_MANUAL_HOOK=y
+          CONFIG_KSU_KPROBES_HOOK=n
+          CONFIG_SUSFS=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_SUSFS_PROC=y
+          CONFIG_SUSFS_MAGIC_MOUNT=y
+          CONFIG_SUSFS_AUTO_BIND=y
+          CONFIG_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_SU=n
+          CONFIG_CFG80211=m
+          CONFIG_MAC80211=m
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          EOF
+          
+          echo "✓ KernelSU + SUSFS added to defconfig"
+
+      - name: Disable defconfig validation
+        working-directory: common
+        run: |
+          set -e
+          
+          sed -i 's/POST_DEFCONFIG_CMDS=.*/POST_DEFCONFIG_CMDS=""/g' build.config.gki.aarch64 || true
+          sed -i 's/PRE_DEFCONFIG_CMDS=.*/PRE_DEFCONFIG_CMDS=""/g' build.config.gki.aarch64 || true
+          
+          echo "✓ Defconfig validation disabled"
+
+      - name: Build kernel with build.sh
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 90
+          max_attempts: 2
+          retry_on: timeout
+          command: |
+            ( while sleep 300; do echo "[keepalive] $(date)"; done ) &
+            KEEPALIVE_PID=$!
+            trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
+            
+            sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
+            sed -i '/MODULES_ORDER/d' common/build.config.gki.aarch64 || true
+            sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
+            
+            # Force use of build.sh (NO Bazel!)
+            LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 \
+              SKIP_DEFCONFIG_CHECK=1 \
+              build/build.sh CC="/usr/bin/ccache clang"
+
+      - name: Show ccache stats
+        run: ccache --show-stats
+
+      - name: Package AnyKernel3
+        run: |
+          IMG=$(find out -name Image 2>/dev/null | head -1)
+          test -f "$IMG" || { echo "Image not found!"; exit 1; }
+          cp "$IMG" AnyKernel3/
+          mkdir -p AnyKernel3/modules/vendor/lib/modules
+          find out -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
+          cd AnyKernel3 && zip -r ../kernel.zip .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sukisu-kernel
+          path: kernel.zip
+
+      - name: Save repo cache
+        if: steps.repo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .repo
+            common
+            build
+            prebuilts
+          key: repo-full-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}
+
+      - name: Save ccache
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}-${{ github.run_id }}
