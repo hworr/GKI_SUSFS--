@@ -1,4 +1,4 @@
-name: SukiSU Kernel Build (Syntax Fixed)
+name: SukiSU Kernel Build (FINAL WORKING)
 
 permissions:
   contents: write
@@ -71,10 +71,11 @@ jobs:
 
     steps:
       - name: Set GKI branch
-  run: |
-    BRANCH="android${ANDROID_VERSION}-${KERNEL_VERSION}-${OS_PATCH_LEVEL}"
-    # ← Verwendet Shell-Variablen die aus dem env: Block kommen
-    echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+        run: |
+          set -e
+          BRANCH="android${ANDROID_VERSION}-${KERNEL_VERSION}-${OS_PATCH_LEVEL}"
+          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+          echo "Using branch: common-$BRANCH"
 
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
@@ -86,9 +87,6 @@ jobs:
             git curl python3 ccache clang lld llvm bc bison flex \
             libelf-dev libssl-dev
 
-      # --------------------------------------------------
-      # CCACHE
-      # --------------------------------------------------
       - name: Restore ccache
         uses: actions/cache@v4
         with:
@@ -105,9 +103,6 @@ jobs:
           ccache --set-config=compression=true
           ccache --zero-stats
 
-      # --------------------------------------------------
-      # REPO + KERNEL
-      # --------------------------------------------------
       - name: Init & sync kernel repo
         run: |
           set -e
@@ -117,7 +112,7 @@ jobs:
 
           "$HOME/bin/repo" init \
             -u https://android.googlesource.com/kernel/manifest \
-            -b common-${{ env.BRANCH }}
+            -b common-${BRANCH}
 
           "$HOME/bin/repo" sync -j$(nproc --all) --fail-fast
 
@@ -128,9 +123,6 @@ jobs:
           test -d .repo || { echo ".repo/ not found"; exit 1; }
           echo "✓ Kernel workspace OK"
 
-      # --------------------------------------------------
-      # BASEBAND GUARD
-      # --------------------------------------------------
       - name: Remove Baseband-Guard
         working-directory: common
         run: |
@@ -138,20 +130,17 @@ jobs:
           sed -i '/baseband_guard/d' security/Kconfig || true
           sed -i '/CONFIG_BBG/d' arch/arm64/configs/gki_defconfig || true
 
-      # --------------------------------------------------
-      # DEPENDENCIES
-      # --------------------------------------------------
       - name: Clone SUSFS + AnyKernel3
         run: |
           set -e
           
-          SUSFS_BRANCH="gki-android${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}"
+          SUSFS_BRANCH="gki-android${ANDROID_VERSION}-${KERNEL_VERSION}"
           
           echo "Attempting to clone SUSFS branch: $SUSFS_BRANCH"
           if ! git clone https://github.com/ShirkNeko/susfs4ksu.git -b "$SUSFS_BRANCH" 2>/dev/null; then
             echo "⚠️ Branch $SUSFS_BRANCH not found, trying alternative formats..."
             
-            SUSFS_BRANCH_ALT="gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}"
+            SUSFS_BRANCH_ALT="gki-${ANDROID_VERSION}-${KERNEL_VERSION}"
             if ! git clone https://github.com/ShirkNeko/susfs4ksu.git -b "$SUSFS_BRANCH_ALT" 2>/dev/null; then
               echo "⚠️ Branch $SUSFS_BRANCH_ALT not found either"
               
@@ -168,14 +157,11 @@ jobs:
           
           git clone https://github.com/MiRinChan/AnyKernel3.git
 
-      # --------------------------------------------------
-      # KERNELSU
-      # --------------------------------------------------
       - name: Determine KernelSU branch
         run: |
-          if [[ "${{ env.KERNELSU_VARIANT }}" == "SukiSU" ]]; then
-            if [[ "${{ env.KERNELSU_BRANCH }}" == "Other" ]]; then
-              echo "KSU_BRANCH=${{ env.KERNELSU_BRANCH_OTHER }}" >> $GITHUB_ENV
+          if [[ "${KERNELSU_VARIANT}" == "SukiSU" ]]; then
+            if [[ "${KERNELSU_BRANCH}" == "Other" ]]; then
+              echo "KSU_BRANCH=${KERNELSU_BRANCH_OTHER}" >> $GITHUB_ENV
             else
               echo "KSU_BRANCH=builtin" >> $GITHUB_ENV
             fi
@@ -184,11 +170,8 @@ jobs:
       - name: Add SukiSU
         if: env.KERNELSU_VARIANT == 'SukiSU'
         run: |
-          curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "${{ env.KSU_BRANCH }}"
+          curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "${KSU_BRANCH}"
 
-      # --------------------------------------------------
-      # HARD REMOVE KERNELSU ALLOWLIST
-      # --------------------------------------------------
       - name: Remove KernelSU allowlist completely
         working-directory: common
         run: |
@@ -202,9 +185,6 @@ jobs:
           
           echo "✓ KernelSU allowlist removed"
 
-      # --------------------------------------------------
-      # SUSFS
-      # --------------------------------------------------
       - name: Apply SUSFS patch
         working-directory: common
         run: |
@@ -244,42 +224,30 @@ jobs:
             cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/ 2>/dev/null || true
           fi
 
-      # --------------------------------------------------
-      # DEFCONFIG
-      # --------------------------------------------------
       - name: Patch gki_defconfig
         working-directory: common
         run: |
           set -e
           DEFCONFIG=arch/arm64/configs/gki_defconfig
 
-          # Remove existing
           sed -i '/^CONFIG_KSU/d' "$DEFCONFIG"
           sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
           sed -i '/^CONFIG_USB_GADGET/d' "$DEFCONFIG"
           sed -i '/^CONFIG_TCP_CONG_BBR/d' "$DEFCONFIG"
 
-          # Add configs
           cat >> "$DEFCONFIG" << 'EOF'
           
-          # KernelSU Core
           CONFIG_KSU=y
           CONFIG_KSU_MANUAL_HOOK=y
           CONFIG_KSU_KPROBES_HOOK=n
-
-          # SUSFS Integration
           CONFIG_SUSFS=y
           CONFIG_KSU_SUSFS=y
           CONFIG_SUSFS_PROC=y
           CONFIG_SUSFS_MAGIC_MOUNT=y
           CONFIG_SUSFS_AUTO_BIND=y
           CONFIG_SUSFS_SUS_PATH=y
-
-          # WiFi/Bluetooth
           CONFIG_CFG80211=m
           CONFIG_MAC80211=m
-
-          # USB Gadget & Networking
           CONFIG_USB_GADGET=y
           CONFIG_USB_CONFIGFS=y
           CONFIG_USB_NET_DRIVERS=y
@@ -288,8 +256,6 @@ jobs:
           CONFIG_USB_NET_CDC_NCM=m
           CONFIG_USB_HID=m
           CONFIG_USB_HIDDEV=y
-
-          # BBR TCP
           CONFIG_TCP_CONG_BBR=y
           CONFIG_NET_SCH_FQ=y
           CONFIG_DEFAULT_BBR=y
@@ -304,25 +270,19 @@ jobs:
           sed -i 's/PRE_DEFCONFIG_CMDS=.*/PRE_DEFCONFIG_CMDS=""/g' build.config.gki.aarch64 || true
           echo "✓ Validation disabled"
 
-      - name: Pre-sort defconfig for Bazel (CRITICAL)
+      - name: Pre-sort defconfig for Bazel
         working-directory: common
         run: |
           set -e
           
-          echo "==> Pre-sorting defconfig to match Bazel's savedefconfig"
+          echo "==> Pre-sorting defconfig"
           
-          # Generate sorted version that Bazel expects
           make ARCH=arm64 gki_defconfig
           make ARCH=arm64 savedefconfig
-          
-          # Replace with sorted version
           cp defconfig arch/arm64/configs/gki_defconfig
           
           echo "✓ Defconfig pre-sorted"
 
-      # --------------------------------------------------
-      # BUILD
-      # --------------------------------------------------
       - name: Build kernel with Bazel
         uses: nick-fields/retry@v3
         with:
@@ -333,49 +293,42 @@ jobs:
             cd "$GITHUB_WORKSPACE"
 
             ( while sleep 300; do
-                echo "[keepalive] build running $(date -u)"
+                echo "[keepalive] $(date -u)"
               done ) &
             KEEPALIVE_PID=$!
             trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
 
             sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
-            sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64 || true
+            sed -i '/MODULES_ORDER/d' common/build.config.gki.aarch64 || true
             sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
 
-            # Use Bazel (defconfig was pre-sorted!)
             tools/bazel build --config=fast --config=stamp //common:kernel_aarch64_dist
 
       - name: Show ccache stats
         run: ccache --show-stats
 
-      # --------------------------------------------------
-      # PACKAGE
-      # --------------------------------------------------
       - name: Package AnyKernel3
         run: |
           set -e
           
-          # Bazel output
           IMG=$(find bazel-bin -name Image 2>/dev/null | head -1)
           
           if [ ! -f "$IMG" ]; then
-            # Fallback to out/
             IMG=$(find out -name Image 2>/dev/null | head -1)
           fi
           
           test -f "$IMG" || { echo "ERROR: Image not found"; exit 1; }
           
-          echo "Using kernel image: $IMG"
+          echo "Using: $IMG"
           cp "$IMG" AnyKernel3/Image
           
           mkdir -p AnyKernel3/modules/vendor/lib/modules
-          find bazel-bin -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
-          find out -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
+          find bazel-bin out -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
           
           cd AnyKernel3
           zip -r ../kernel.zip .
           
-          echo "✓ Kernel packaged"
+          echo "✓ Packaged"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
