@@ -69,10 +69,11 @@ on:
         type: boolean
 
 env:
-  KERNEL_DIR: ${{ github.workspace }}/kernel
-  CLANG_DIR: ${{ github.workspace }}/clang
-  ANYKERNEL_DIR: ${{ github.workspace }}/anykernel
+  KERNEL_DIR: ${{ github.workspace }}/kernel_source
+  CLANG_DIR: ${{ github.workspace }}/toolchain/clang
+  ANYKERNEL_DIR: ${{ github.workspace }}/anykernel3
   OUT_DIR: ${{ github.workspace }}/out
+  SUSFS_DIR: ${{ github.workspace }}/susfs_src
 
 jobs:
   build:
@@ -83,6 +84,15 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Cleanup Previous Builds
+        run: |
+          echo "Cleaning up previous build directories..."
+          rm -rf $KERNEL_DIR || true
+          rm -rf $CLANG_DIR || true
+          rm -rf $ANYKERNEL_DIR || true
+          rm -rf $OUT_DIR || true
+          rm -rf $SUSFS_DIR || true
 
       - name: Setup Build Environment
         run: |
@@ -100,6 +110,7 @@ jobs:
 
       - name: Clone Kernel Source
         run: |
+          rm -rf $KERNEL_DIR || true
           git clone --depth=1 -b ${{ inputs.kernel_branch }} \
             ${{ inputs.kernel_source }} $KERNEL_DIR
 
@@ -163,10 +174,11 @@ jobs:
           echo "Setting up SUSFS..."
           
           # SUSFS Repository klonen
+          rm -rf $SUSFS_DIR || true
           git clone --depth=1 -b ${{ inputs.susfs_branch }} \
-            https://gitlab.com/simonpunk/susfs4ksu.git ${{ github.workspace }}/susfs
+            https://gitlab.com/simonpunk/susfs4ksu.git $SUSFS_DIR
           
-          SUSFS_SRC="${{ github.workspace }}/susfs/kernel_patches"
+          SUSFS_SRC="$SUSFS_DIR/kernel_patches"
           
           # SUSFS Kernel Module kopieren
           if [ -d "$SUSFS_SRC/fs" ]; then
@@ -284,6 +296,7 @@ jobs:
         run: |
           echo "Preparing AnyKernel3 package..."
           
+          rm -rf $ANYKERNEL_DIR || true
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git $ANYKERNEL_DIR
           
           cd $ANYKERNEL_DIR
