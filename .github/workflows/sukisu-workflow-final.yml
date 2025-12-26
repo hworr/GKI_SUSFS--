@@ -30,12 +30,17 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    env:
-      CCACHE_DIR: /home/runner/.ccache
-      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
-      CCACHE_NOHASHDIR: "true"
-      CCACHE_HARDLINK: "true"
-      CCACHE_CPP2: "yes"
+    steps:
+      - name: Set GKI branch
+        run: |
+          set -e
+          BRANCH="android${ANDROID_VERSION}-${KERNEL_VERSION}-${OS_PATCH_LEVEL}"
+          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+          echo "Using branch: common-$BRANCH"
+        env:
+          ANDROID_VERSION: ${{ inputs.android_version }}
+          KERNEL_VERSION: ${{ inputs.kernel_version }}
+          OS_PATCH_LEVEL: ${{ inputs.os_patch_level }}
 
     steps:
     # --------------------------------------------------
