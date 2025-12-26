@@ -183,31 +183,31 @@ jobs:
     # DEFCONFIG
     # --------------------------------------------------
     - name: Patch gki_defconfig
-        working-directory: common
-        run: |
+      working-directory: common
+      run: |
           DEF=arch/arm64/configs/gki_defconfig
           sed -i '/^CONFIG_KSU/d;/^CONFIG_SUSFS/d' "$DEF"
-                    
-        cat >> "$DEF" << 'EOF'
-        CONFIG_KSU=y
-        CONFIG_KSU_MANUAL_HOOK=y
-        ONFIG_KSU_KPROBES_HOOK=n
-        CONFIG_SUSFS=y
-        CONFIG_KSU_SUSFS=y
-        CONFIG_CFG80211=m
-        CONFIG_MAC80211=m
-        CONFIG_USB_GADGET=y
-        CONFIG_USB_CONFIGFS=y
-        CONFIG_TMPFS_XATTR=y
-        CONFIG_TMPFS_POSIX_ACL=y
-         CONFIG_TCP_CONG_BBR=y
-         CONFIG_NET_SCH_FQ=y
-         ONFIG_DEFAULT_BBR=y
-         EOF
+          
+          cat >> "$DEF" << 'EOF'
+          CONFIG_KSU=y
+          CONFIG_KSU_MANUAL_HOOK=y
+          ONFIG_KSU_KPROBES_HOOK=n
+          CONFIG_SUSFS=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_CFG80211=m
+          CONFIG_MAC80211=m
+          CONFIG_USB_GADGET=y
+          CONFIG_USB_CONFIGFS=y
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+           CONFIG_TCP_CONG_BBR=y
+           CONFIG_NET_SCH_FQ=y
+           ONFIG_DEFAULT_BBR=y
+           EOF
          
-         - name: Build kernel with Bazel
-          uses: nick-fields/retry@v3
-          with:
+    - name: Build kernel with Bazel
+      uses: nick-fields/retry@v3
+      with:
             timeout_minutes: 90
             max_attempts: 2
             retry_on: timeout
@@ -229,8 +229,8 @@ jobs:
                 cd AnyKernel3
                 zip -r ../kernel.zip .
         
-            - name: Upload artifact
-              uses: actions/upload-artifact@v4
-              with:
+              - name: Upload artifact
+                uses: actions/upload-artifact@v4
+                with:
                 name: nethunter-kernel
                 path: kernel.zip
