@@ -31,9 +31,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # --------------------------------------------------
-      # SET GKI BRANCH
-      # --------------------------------------------------
       - name: Set GKI branch
         run: |
           set -e
@@ -45,9 +42,6 @@ jobs:
           KERNEL_VERSION: ${{ inputs.kernel_version }}
           OS_PATCH_LEVEL: ${{ inputs.os_patch_level }}
 
-      # --------------------------------------------------
-      # SPACE + TOOLS
-      # --------------------------------------------------
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
 
