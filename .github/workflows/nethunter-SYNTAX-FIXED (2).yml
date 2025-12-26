@@ -124,13 +124,9 @@ jobs:
           git clone https://github.com/MiRinChan/AnyKernel3.git
 
       - name: Add SukiSU
+        if: env.KERNELSU_VARIANT == 'SukiSU'
         run: |
-          curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "${KERNELSU_BRANCH}"
-
-      - name: Remove KernelSU allowlist completely
-        working-directory: common
-        run: |
-          set -e
+          curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "${{ env.KSU_BRANCH }}"
           
           echo "==> Searching for allowlist files"
           find drivers/kernelsu -name "*allowlist*" -o -name "*profile*" 2>/dev/null || true
@@ -219,6 +215,16 @@ jobs:
             echo "Some hunks failed, cleaning up rejects"
             find . -name "*.rej" -delete 2>/dev/null || true
           fi
+
+      - name: Apply SUSFS patch
+        working-directory: common
+        run: |
+          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch || true
+          rm -f fs/proc/*.rej
+      - name: Copy SUSFS files
+        run: |
+          cp susfs4ksu/kernel_patches/fs/* common/fs/
+          cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/
 
       - name: Copy SUSFS files
         run: |
