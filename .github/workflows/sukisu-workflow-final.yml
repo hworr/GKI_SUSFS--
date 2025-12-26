@@ -328,6 +328,13 @@ jobs:
           make ARCH=arm64 savedefconfig
           cp defconfig arch/arm64/configs/gki_defconfig
           echo "✓ gki_defconfig synced"
+          
+      - name: Make KernelSU GKI-safe (remove SELinux internals)
+        run: |
+          cd common
+          sed -i '/security\/selinux\/include\/security.h/d' drivers/kernelsu/*.c
+          sed -i '/security\/selinux\/include\/objsec.h/d' drivers/kernelsu/*.c
+          
       # --------------------------------------------------
       # BUILD
       # --------------------------------------------------
