@@ -407,6 +407,33 @@ jobs:
           
           echo "✓ Defconfig validation completely disabled"
 
+            # Clean tree first
+            cd common && make mrproper && cd ..
+
+      - name: Configure KernelSU + SUSFS
+        working-directory: ${{ env.KERNEL_ROOT }}
+        run: |
+          cat >> common/arch/arm64/configs/gki_defconfig << 'EOF'
+          CONFIG_KSU=y
+          CONFIG_KSU_MANUAL_HOOK=y
+          CONFIG_KSU_MANUAL_SU=n
+      
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_SUS_SU=n
+      
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+      
+          # Pixel / Android 15 SAFE SETTINGS
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=n
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=n
+          CONFIG_KSU_SUSFS_SUS_MOUNT=n
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=n
+          EOF
+
+          sed -i 's/check_defconfig//' common/build.config.gki
+
+
       - name: Build kernel
         uses: nick-fields/retry@v3
         with:
