@@ -285,7 +285,6 @@ jobs:
     # --------------------------------------------------
     - name: Build kernel
       run: |
-       make mrproper
         sed -i \
           -e 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' \
           -e '/MODULES_ORDER=android\/gki_aarch64_modules/d' \
