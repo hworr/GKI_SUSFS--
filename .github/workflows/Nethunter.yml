@@ -228,6 +228,10 @@ jobs:
         CONFIG_SUSFS_MAGIC_MOUNT=y
         CONFIG_SUSFS_AUTO_BIND=y
         CONFIG_SUSFS_SUS_PATH=y
+        # SELinux required defaults (GKI)
+        CONFIG_SECURITY_SELINUX=y
+        CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS=8
+        CONFIG_SECURITY_SELINUX_SID2STR_CACHE_SIZE=0
         
         # ==========================
         # NetHunter (GKI SAFE)
