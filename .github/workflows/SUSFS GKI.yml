@@ -441,6 +441,37 @@ jobs:
         working-directory: common
         run: make mrproper || true
 
+      - name: Final KernelSU + SUSFS config enforcement
+        working-directory: common
+        run: |
+          set -e
+          DEFCONFIG="arch/arm64/configs/gki_defconfig"
+          
+          echo "==> Forcing final KernelSU + SUSFS config"
+          
+          # Remove any existing KSU/SUSFS config
+          sed -i '/^CONFIG_KSU/d' "$DEFCONFIG"
+          sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
+          
+          # Force add all required configs
+          cat >> "$DEFCONFIG" << 'EOF'
+          CONFIG_KSU=y
+          CONFIG_KSU_MANUAL_HOOK=y
+          CONFIG_KSU_KPROBES_HOOK=n
+          CONFIG_SUSFS=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_SUSFS_PROC=y
+          CONFIG_SUSFS_MAGIC_MOUNT=y
+          CONFIG_SUSFS_AUTO_BIND=y
+          CONFIG_SUSFS_SUS_PATH=y
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          EOF
+          
+          echo "✓ Final KernelSU + SUSFS config applied"
+          echo "==> Verification:"
+          grep -E '^CONFIG_(KSU|SUSFS)' "$DEFCONFIG"
+
       - name: Build kernel
         uses: nick-fields/retry@v3
         with:
