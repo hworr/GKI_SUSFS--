@@ -1,0 +1,382 @@
+name: Build Kernel with KernelSU/SuKiSu + SUSFS
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_source:
+        description: 'Kernel Source Repository'
+        required: true
+        default: 'https://github.com/user/kernel_source'
+        type: string
+      kernel_branch:
+        description: 'Kernel Branch'
+        required: true
+        default: 'main'
+        type: string
+      kernel_defconfig:
+        description: 'Defconfig Name'
+        required: true
+        default: 'vendor/device_defconfig'
+        type: string
+      ksu_variant:
+        description: 'KernelSU Variante'
+        required: true
+        default: 'sukisu'
+        type: choice
+        options:
+          - sukisu
+          - kernelsu-next
+          - none
+      susfs_enabled:
+        description: 'SUSFS aktivieren'
+        required: true
+        default: true
+        type: boolean
+      susfs_branch:
+        description: 'SUSFS Branch (z.B. gki-android14-6.1)'
+        required: false
+        default: 'gki-android14-6.1'
+        type: string
+      clang_version:
+        description: 'Clang Version'
+        required: true
+        default: 'r530567'
+        type: string
+      android_version:
+        description: 'Android Version'
+        required: true
+        default: '14'
+        type: choice
+        options:
+          - '12'
+          - '13'
+          - '14'
+          - '15'
+      kernel_version:
+        description: 'Kernel Version (z.B. 5.15, 6.1, 6.6)'
+        required: true
+        default: '6.1'
+        type: choice
+        options:
+          - '5.10'
+          - '5.15'
+          - '6.1'
+          - '6.6'
+      build_boot_image:
+        description: 'Boot Image erstellen (AnyKernel3)'
+        required: true
+        default: true
+        type: boolean
+
+env:
+  KERNEL_DIR: ${{ github.workspace }}/kernel
+  CLANG_DIR: ${{ github.workspace }}/clang
+  ANYKERNEL_DIR: ${{ github.workspace }}/anykernel
+  OUT_DIR: ${{ github.workspace }}/out
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Build Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git curl wget \
+            build-essential \
+            bc bison flex \
+            libssl-dev libelf-dev \
+            python3 python-is-python3 \
+            zip unzip \
+            libncurses-dev \
+            lld llvm \
+            cpio
+
+      - name: Clone Kernel Source
+        run: |
+          git clone --depth=1 -b ${{ inputs.kernel_branch }} \
+            ${{ inputs.kernel_source }} $KERNEL_DIR
+
+      - name: Download Clang Toolchain
+        run: |
+          mkdir -p $CLANG_DIR
+          cd $CLANG_DIR
+          
+          # Google Clang herunterladen
+          CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-${{ inputs.clang_version }}.tar.gz"
+          
+          echo "Downloading Clang ${{ inputs.clang_version }}..."
+          curl -LSs "$CLANG_URL" -o clang.tar.gz
+          tar -xzf clang.tar.gz
+          rm clang.tar.gz
+          
+          echo "CLANG_PATH=$CLANG_DIR/bin" >> $GITHUB_ENV
+
+      - name: Setup KernelSU (SuKiSu)
+        if: inputs.ksu_variant == 'sukisu'
+        run: |
+          cd $KERNEL_DIR
+          
+          echo "Setting up SuKiSu..."
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5-sukisu
+          
+          # SuKiSu-spezifische Patches anwenden falls vorhanden
+          if [ -d "KernelSU" ]; then
+            cd KernelSU
+            git remote add sukisu https://github.com/ShirkNeko/SuKiSu.git || true
+            git fetch sukisu
+            git checkout sukisu/main -- . 2>/dev/null || echo "Using default SuKiSu setup"
+            cd ..
+          fi
+          
+          echo "KSU_VARIANT=sukisu" >> $GITHUB_ENV
+
+      - name: Setup KernelSU Next
+        if: inputs.ksu_variant == 'kernelsu-next'
+        run: |
+          cd $KERNEL_DIR
+          
+          echo "Setting up KernelSU Next..."
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+          
+          # KernelSU Next Branch verwenden
+          if [ -d "KernelSU" ]; then
+            cd KernelSU
+            git fetch origin next
+            git checkout next 2>/dev/null || git checkout origin/next
+            cd ..
+          fi
+          
+          echo "KSU_VARIANT=kernelsu-next" >> $GITHUB_ENV
+
+      - name: Setup SUSFS
+        if: inputs.susfs_enabled
+        run: |
+          cd $KERNEL_DIR
+          
+          echo "Setting up SUSFS..."
+          
+          # SUSFS Repository klonen
+          git clone --depth=1 -b ${{ inputs.susfs_branch }} \
+            https://gitlab.com/simonpunk/susfs4ksu.git ${{ github.workspace }}/susfs
+          
+          SUSFS_SRC="${{ github.workspace }}/susfs/kernel_patches"
+          
+          # SUSFS Kernel Module kopieren
+          if [ -d "$SUSFS_SRC/fs" ]; then
+            cp -r "$SUSFS_SRC/fs/susfs.c" fs/ 2>/dev/null || true
+            cp -r "$SUSFS_SRC/fs/susfs.h" fs/ 2>/dev/null || true
+            cp -r "$SUSFS_SRC/include/linux/susfs.h" include/linux/ 2>/dev/null || true
+          fi
+          
+          # SUSFS Patches anwenden
+          PATCH_DIR="$SUSFS_SRC/50_add_susfs_in_${{ inputs.kernel_version }}"
+          if [ -d "$PATCH_DIR" ]; then
+            for patch in "$PATCH_DIR"/*.patch; do
+              if [ -f "$patch" ]; then
+                echo "Applying patch: $(basename $patch)"
+                git apply --check "$patch" 2>/dev/null && git apply "$patch" || \
+                  patch -p1 < "$patch" || echo "Patch failed: $patch (may already be applied)"
+              fi
+            done
+          fi
+          
+          # KernelSU SUSFS Integration
+          if [ -d "KernelSU" ]; then
+            KSU_SUSFS_PATCH="$SUSFS_SRC/KernelSU/10_enable_susfs_for_ksu.patch"
+            if [ -f "$KSU_SUSFS_PATCH" ]; then
+              cd KernelSU
+              git apply --check "$KSU_SUSFS_PATCH" 2>/dev/null && git apply "$KSU_SUSFS_PATCH" || \
+                echo "KSU SUSFS patch may already be applied"
+              cd ..
+            fi
+          fi
+          
+          echo "SUSFS_ENABLED=true" >> $GITHUB_ENV
+
+      - name: Configure Kernel
+        run: |
+          cd $KERNEL_DIR
+          
+          export PATH="$CLANG_PATH:$PATH"
+          
+          # Base defconfig erstellen
+          make O=$OUT_DIR ARCH=arm64 \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            LLVM=1 \
+            ${{ inputs.kernel_defconfig }}
+          
+          # KernelSU aktivieren
+          if [ "${{ inputs.ksu_variant }}" != "none" ]; then
+            echo "Enabling KernelSU in config..."
+            echo "CONFIG_KSU=y" >> $OUT_DIR/.config
+            echo "CONFIG_KSU_SUSFS=y" >> $OUT_DIR/.config
+          fi
+          
+          # SUSFS Configs aktivieren
+          if [ "${{ inputs.susfs_enabled }}" == "true" ]; then
+            echo "Enabling SUSFS configs..."
+            cat >> $OUT_DIR/.config << EOF
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_SUSFS_SUS_SU=n
+          EOF
+          fi
+          
+          # Config regenerieren
+          make O=$OUT_DIR ARCH=arm64 \
+            CC=clang \
+            LLVM=1 \
+            olddefconfig
+
+      - name: Build Kernel
+        run: |
+          cd $KERNEL_DIR
+          
+          export PATH="$CLANG_PATH:$PATH"
+          
+          echo "Starting kernel build..."
+          echo "KSU Variant: ${{ inputs.ksu_variant }}"
+          echo "SUSFS Enabled: ${{ inputs.susfs_enabled }}"
+          
+          make -j$(nproc) O=$OUT_DIR ARCH=arm64 \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            2>&1 | tee build.log
+          
+          # Prüfen ob Image erstellt wurde
+          if [ -f "$OUT_DIR/arch/arm64/boot/Image" ]; then
+            echo "Kernel Image built successfully!"
+          elif [ -f "$OUT_DIR/arch/arm64/boot/Image.gz" ]; then
+            echo "Kernel Image.gz built successfully!"
+          else
+            echo "ERROR: Kernel build failed!"
+            tail -100 build.log
+            exit 1
+          fi
+
+      - name: Create AnyKernel3 Package
+        if: inputs.build_boot_image
+        run: |
+          echo "Preparing AnyKernel3 package..."
+          
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git $ANYKERNEL_DIR
+          
+          cd $ANYKERNEL_DIR
+          
+          # Template anpassen
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+          sed -i 's/do.modules=0/do.modules=0/g' anykernel.sh
+          
+          # Kernel Image kopieren
+          if [ -f "$OUT_DIR/arch/arm64/boot/Image" ]; then
+            cp $OUT_DIR/arch/arm64/boot/Image .
+          elif [ -f "$OUT_DIR/arch/arm64/boot/Image.gz" ]; then
+            cp $OUT_DIR/arch/arm64/boot/Image.gz .
+          fi
+          
+          # DTBO kopieren falls vorhanden
+          if [ -f "$OUT_DIR/arch/arm64/boot/dtbo.img" ]; then
+            cp $OUT_DIR/arch/arm64/boot/dtbo.img .
+          fi
+          
+          # DTB kopieren falls vorhanden
+          find $OUT_DIR -name "*.dtb" -exec cp {} . \; 2>/dev/null || true
+          
+          # Unnötige Dateien entfernen
+          rm -rf .git README.md
+          
+          # ZIP erstellen
+          VARIANT="${{ inputs.ksu_variant }}"
+          SUSFS_TAG=""
+          if [ "${{ inputs.susfs_enabled }}" == "true" ]; then
+            SUSFS_TAG="-susfs"
+          fi
+          
+          ZIP_NAME="Kernel-${VARIANT}${SUSFS_TAG}-android${{ inputs.android_version }}-${{ inputs.kernel_version }}-$(date +%Y%m%d).zip"
+          
+          zip -r9 "${{ github.workspace }}/${ZIP_NAME}" * -x .git README.md
+          
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+
+      - name: Upload Kernel Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-image
+          path: |
+            ${{ env.OUT_DIR }}/arch/arm64/boot/Image*
+            ${{ env.OUT_DIR }}/arch/arm64/boot/dtbo.img
+          if-no-files-found: error
+
+      - name: Upload AnyKernel3 Package
+        if: inputs.build_boot_image
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ github.workspace }}/${{ env.ZIP_NAME }}
+          if-no-files-found: warn
+
+      - name: Create Release
+        if: github.event_name == 'workflow_dispatch' && inputs.build_boot_image
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}-${{ inputs.ksu_variant }}
+          name: "Kernel Build #${{ github.run_number }} - ${{ inputs.ksu_variant }}"
+          body: |
+            ## Kernel Build Information
+            
+            - **KSU Variant:** ${{ inputs.ksu_variant }}
+            - **SUSFS:** ${{ inputs.susfs_enabled }}
+            - **Android Version:** ${{ inputs.android_version }}
+            - **Kernel Version:** ${{ inputs.kernel_version }}
+            - **Clang:** ${{ inputs.clang_version }}
+            - **Build Date:** ${{ github.event.repository.updated_at }}
+            
+            ### Features
+            - KernelSU/SuKiSu Root Support
+            ${{ inputs.susfs_enabled && '- SUSFS (Filesystem Hiding)' || '' }}
+            - AnyKernel3 Flashable ZIP
+          files: |
+            ${{ github.workspace }}/${{ env.ZIP_NAME }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Summary
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| KSU Variant | ${{ inputs.ksu_variant }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SUSFS | ${{ inputs.susfs_enabled }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Android | ${{ inputs.android_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Kernel | ${{ inputs.kernel_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Clang | ${{ inputs.clang_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Build completed successfully!" >> $GITHUB_STEP_SUMMARY
