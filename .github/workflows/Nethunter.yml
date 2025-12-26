@@ -1,4 +1,4 @@
-name: GKI Kernel Build (SukiSU + SUSFS + NetHunter)
+name: Nethunter Kernel Build (SukiSU + SUSFS + NetHunter)
 
 permissions:
   contents: write
