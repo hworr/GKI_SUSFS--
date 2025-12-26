@@ -139,29 +139,29 @@ jobs:
           find drivers/kernelsu -type f -name "*profile*" -delete 2>/dev/null || true
           echo "Allowlist removed"
 
-      - name: Apply SUSFS patch
-        working-directory: common
-        run: |
-          set -e
-          PATCH_DIR="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches"
-          if [ -f "$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch" ]; then
-            PATCH="$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch"
-          elif [ -f "$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch" ]; then
-            PATCH="$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch"
-          else
-            PATCH=$(find "$PATCH_DIR" -name "*6.6*.patch" | head -1)
-            if [ -z "$PATCH" ]; then
-              echo "No SUSFS patch found"
-              exit 0
-            fi
-          fi
-          echo "Applying SUSFS patch: $PATCH"
-          if patch -p1 < "$PATCH"; then
-            echo "Patch applied"
-          else
-            echo "Some hunks failed, cleaning rejects"
-            find . -name "*.rej" -delete 2>/dev/null || true
-          fi
+     # - name: Apply SUSFS patch
+     #   working-directory: common
+     #   run: |
+     #     set -e
+     #     PATCH_DIR="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches"
+     #     if [ -f "$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch" ]; then
+     #       PATCH="$PATCH_DIR/50_add_susfs_in_gki-android15-6.6.patch"
+     #     elif [ -f "$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch" ]; then
+     #       PATCH="$PATCH_DIR/50_add_susfs_in_gki-15-6.6.patch"
+     #     else
+     #       PATCH=$(find "$PATCH_DIR" -name "*6.6*.patch" | head -1)
+     #       if [ -z "$PATCH" ]; then
+     #         echo "No SUSFS patch found"
+     #         exit 0
+     #       fi
+     #     fi
+     #     echo "Applying SUSFS patch: $PATCH"
+     #     if patch -p1 < "$PATCH"; then
+     #       echo "Patch applied"
+     #     else
+     #       echo "Some hunks failed, cleaning rejects"
+     #       find . -name "*.rej" -delete 2>/dev/null || true
+     #     fi
 
       - name: Copy SUSFS files
         run: |
