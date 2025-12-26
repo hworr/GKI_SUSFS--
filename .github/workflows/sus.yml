@@ -104,39 +104,32 @@ jobs:
             build
             prebuilts
           key: repo-full-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}
-
-      - name: Init and sync kernel repo
-        if: steps.repo-cache.outputs.cache-hit != 'true'
+          
+      - name: Repo init & sync (GKI with build.sh)
         run: |
           set -e
-          REPO_BIN="$HOME/bin/repo"
           mkdir -p "$HOME/bin"
-          curl -o "$REPO_BIN" https://storage.googleapis.com/git-repo-downloads/repo
-          chmod a+x "$REPO_BIN"
-          REPO="$REPO_BIN"
-          FORMATTED_BRANCH="android${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}"
-          echo "==> repo init"
-          "$REPO" init -u https://android.googlesource.com/kernel/manifest -b common-${FORMATTED_BRANCH}
-          REMOTE_BRANCH=$(git ls-remote https://android.googlesource.com/kernel/common ${FORMATTED_BRANCH})
-          DEFAULT_MANIFEST_PATH=.repo/manifests/default.xml
-          if echo "$REMOTE_BRANCH" | grep -q deprecated; then
-            sed -i "s/\"${FORMATTED_BRANCH}\"/\"deprecated\/${FORMATTED_BRANCH}\"/g" "$DEFAULT_MANIFEST_PATH"
-          fi
-          echo "==> repo sync"
-          "$REPO" sync -j"$(nproc --all)" --fail-fast
-
-      - name: Verify kernel repo workspace
-        run: |
-          set -e
-          test -d common || { echo "common/ not found"; exit 1; }
-          test -d .repo || { echo ".repo/ not found"; exit 1; }
-          
-          if [ ! -f "build/build.sh" ]; then
-            echo "ERROR: build/build.sh not found!"
-            echo "This workflow REQUIRES build.sh (cannot use Bazel due to defconfig check)"
-            exit 1
-          fi
-          
+          curl -o "$HOME/bin/repo" https://storage.googleapis.com/git-repo-downloads/repo
+          chmod +x "$HOME/bin/repo"
+      
+          "$HOME/bin/repo" init \
+            -u https://android.googlesource.com/kernel/manifest \
+            -b common-android15-6.6
+      
+          "$HOME/bin/repo" sync -j$(nproc --all) --fail-fast
+      
+            - name: Verify kernel repo workspace
+              run: |
+                set -e
+                test -d common || { echo "common/ not found"; exit 1; }
+                test -d .repo || { echo ".repo/ not found"; exit 1; }
+                
+                if [ ! -f "build/build.sh" ]; then
+                  echo "ERROR: build/build.sh not found!"
+                  echo "This workflow REQUIRES build.sh (cannot use Bazel due to defconfig check)"
+                  exit 1
+                fi
+                
           echo "✓ Kernel repo workspace ready with build.sh"
 
       - name: Clone SUSFS and AnyKernel3
