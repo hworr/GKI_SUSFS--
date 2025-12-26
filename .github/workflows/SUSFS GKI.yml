@@ -1,4 +1,4 @@
-name: SukiSU + SUSFS Kernel Build
+name: SukiSU Kernel Build (GKI Fixed)
 
 permissions:
   contents: write
@@ -102,7 +102,7 @@ jobs:
             .repo
             common
           key: repo-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}
-          
+
       - name: Init and sync kernel repo
         if: steps.repo-cache.outputs.cache-hit != 'true'
         run: |
@@ -112,7 +112,7 @@ jobs:
           curl -o "$REPO_BIN" https://storage.googleapis.com/git-repo-downloads/repo
           chmod a+x "$REPO_BIN"
           REPO="$REPO_BIN"
-          FORMATTED_BRANCH="android15-6.6-2025-09"
+          FORMATTED_BRANCH="android${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}"
           echo "==> repo init"
           "$REPO" init -u https://android.googlesource.com/kernel/manifest -b common-${FORMATTED_BRANCH}
           REMOTE_BRANCH=$(git ls-remote https://android.googlesource.com/kernel/common ${FORMATTED_BRANCH})
@@ -364,21 +364,16 @@ jobs:
         working-directory: common
         run: |
           set -e
-          
           rm -rf security/baseband-guard || true
           sed -i '/baseband_guard/d' security/Kconfig || true
-          
           echo "✓ Defconfig prepared"
 
       - name: Create config fragment
         run: |
           cat > /tmp/kernelsu_susfs.config << 'EOF'
-          # KernelSU Core
           CONFIG_KSU=y
           CONFIG_KSU_MANUAL_HOOK=y
           CONFIG_KSU_KPROBES_HOOK=n
-          
-          # SUSFS Integration
           CONFIG_SUSFS=y
           CONFIG_KSU_SUSFS=y
           CONFIG_SUSFS_PROC=y
@@ -386,12 +381,8 @@ jobs:
           CONFIG_SUSFS_AUTO_BIND=y
           CONFIG_SUSFS_SUS_PATH=y
           CONFIG_KSU_SUSFS_SUS_SU=n
-          
-          # WiFi/Bluetooth Modules
           CONFIG_CFG80211=m
           CONFIG_MAC80211=m
-          
-          # Basic filesystem support
           CONFIG_TMPFS_XATTR=y
           CONFIG_TMPFS_POSIX_ACL=y
           EOF
@@ -446,7 +437,6 @@ jobs:
             KEEPALIVE_PID=$!
             trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
             
-            # Clean the tree first
             cd common && make mrproper && cd ..
             
             sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
