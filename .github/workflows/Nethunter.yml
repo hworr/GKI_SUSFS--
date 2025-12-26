@@ -109,9 +109,9 @@ jobs:
       # SUSFS FIX PATCHES (OPTIONAL / SAFE)
       # --------------------------------------------------
       
-      - name: Apply SUSFS fix patches (REQUIRED)
-        working-directory: ${{ env.KERNEL_ROOT }}/common
-        run: |
+    - name: Apply SUSFS fix patches (REQUIRED)
+      working-directory: ${{ env.KERNEL_ROOT }}/common
+      run: |
           set -e
           FIX="$KERNEL_PATCHES/wild/susfs_fix_patches/v2.0.0"
           apply_optional() {
@@ -130,10 +130,10 @@ jobs:
           apply_optional "$FIX/1_fix_base.c.patch"
           rm -f fs/proc/*.rej
 
-      - name: Apply Hooks Patches
-        if: ${{ inputs.ksu_variant == 'WKSU' }}
-        working-directory: ${{ env.KERNEL_ROOT }}/common
-        run: |
+    - name: Apply Hooks Patches
+      if: ${{ inputs.ksu_variant == 'WKSU' }}
+      working-directory: ${{ env.KERNEL_ROOT }}/common
+      run: |
           cp "$KERNEL_PATCHES/wild/hooks/scope_min_manual_hooks_v1.4.patch" ./
           patch -p1 -F 3 < scope_min_manual_hooks_v1.4.patch
 
