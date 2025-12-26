@@ -38,360 +38,207 @@ jobs:
       CCACHE_CPP2: "yes"
 
     steps:
-      # --------------------------------------------------
-      # SPACE + TOOLS
-      # --------------------------------------------------
-      - name: Maximize build space
-        uses: easimon/maximize-build-space@master
+    # --------------------------------------------------
+    # SPACE + TOOLS
+    # --------------------------------------------------
+    - name: Maximize build space
+      uses: easimon/maximize-build-space@master
 
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y git curl python3 ccache clang lld llvm bc bison flex libelf-dev libssl-dev
-      # --------------------------------------------------
-      # CCACHE
-      # --------------------------------------------------
-      - name: Restore ccache
-        uses: actions/cache@v4
-        with:
-          path: /home/runner/.ccache
-          key: ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
-          restore-keys: |
-            ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-
-            ccache-${{ inputs.android_version }}-
-            ccache-
-      - name: Setup ccache
-        run: |
-          ccache --max-size=10G
-          ccache --set-config=compression=true
-          ccache --zero-stats
-      # --------------------------------------------------
-      # REPO-WORKSPACE CACHEN
-      # --------------------------------------------------
-      - name: Restore kernel repo workspace
-        id: repo-cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            .repo
-            common
-            build
-            prebuilts
-          key: repo-full-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
-          
-      - name: Init & sync kernel repo (if cache miss)
-        if: steps.repo-cache.outputs.cache-hit != 'true'
-        run: |
-          set -e
-          REPO_BIN="$HOME/bin/repo"
-          mkdir -p "$HOME/bin"
-          curl -o "$REPO_BIN" https://storage.googleapis.com/git-repo-downloads/repo
-          chmod a+x "$REPO_BIN"
-          REPO="$REPO_BIN"
-          FORMATTED_BRANCH="android15-6.6-2025-09"
-          echo "==> repo init"
-          "$REPO" init -u https://android.googlesource.com/kernel/manifest \
-            -b common-${FORMATTED_BRANCH}
-          REMOTE_BRANCH=$(git ls-remote https://android.googlesource.com/kernel/common ${FORMATTED_BRANCH})
-          DEFAULT_MANIFEST_PATH=.repo/manifests/default.xml
-          if grep -q deprecated <<< "$REMOTE_BRANCH"; then
-            sed -i "s/\"${FORMATTED_BRANCH}\"/\"deprecated\/${FORMATTED_BRANCH}\"/g" "$DEFAULT_MANIFEST_PATH"
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          git curl python3 ccache clang lld llvm bc bison flex \
+          libelf-dev libssl-dev
+
+    # --------------------------------------------------
+    # CCACHE
+    # --------------------------------------------------
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: /home/runner/.ccache
+        key: ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
+        restore-keys: |
+          ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-
+          ccache-${{ inputs.android_version }}-
+          ccache-
+
+    - name: Setup ccache
+      run: |
+        ccache --max-size=10G
+        ccache --set-config=compression=true
+        ccache --zero-stats
+
+    # --------------------------------------------------
+    # REPO + KERNEL
+    # --------------------------------------------------
+    - name: Init & sync kernel repo
+      run: |
+        set -e
+        mkdir -p "$HOME/bin"
+        curl -o "$HOME/bin/repo" https://storage.googleapis.com/git-repo-downloads/repo
+        chmod +x "$HOME/bin/repo"
+
+        BRANCH="android${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
+
+        "$HOME/bin/repo" init \
+          -u https://android.googlesource.com/kernel/manifest \
+          -b common-$BRANCH
+
+        "$HOME/bin/repo" sync -j$(nproc --all) --fail-fast
+
+    - name: Verify kernel workspace
+      run: |
+        set -e
+        test -d common
+        test -d .repo
+        test -f build/build.sh
+        echo "✓ Kernel workspace OK"
+
+    # --------------------------------------------------
+    # BASEBAND GUARD
+    # --------------------------------------------------
+    - name: Remove Baseband-Guard
+      working-directory: common
+      run: |
+        rm -rf security/baseband-guard || true
+        sed -i '/baseband_guard/d' security/Kconfig || true
+        sed -i '/CONFIG_BBG/d' arch/arm64/configs/gki_defconfig || true
+
+    # --------------------------------------------------
+    # DEPENDENCIES
+    # --------------------------------------------------
+    - name: Clone SUSFS + AnyKernel3
+      run: |
+        git clone https://github.com/ShirkNeko/susfs4ksu.git \
+          -b gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}
+        git clone https://github.com/MiRinChan/AnyKernel3.git
+
+    # --------------------------------------------------
+    # KERNELSU
+    # --------------------------------------------------
+    - name: Determine KernelSU branch
+      run: |
+        if [[ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]]; then
+          if [[ "${{ inputs.kernelsu_branch }}" == "Other" ]]; then
+            echo "BRANCH=${{ inputs.kernelsu_branch_other }}" >> $GITHUB_ENV
+          else
+            echo "BRANCH=builtin" >> $GITHUB_ENV
           fi
-          echo "==> repo sync"
-          "$REPO" sync -j"$(nproc --all)" --fail-fast
+        fi
 
-      - name: Verify kernel repo workspace
-        run: |
-          set -e
-          if [ ! -d common ]; then
-            echo "common/ directory not found after repo restore/sync"
-            exit 1
-          fi
-          if [ ! -d .repo ]; then
-            echo ".repo/ directory not found after repo restore/sync"
-            exit 1
-          fi
-          
-          if [ ! -f "build/build.sh" ]; then
-            echo "ERROR: build/build.sh not found!"
-            echo "This workflow REQUIRES build.sh (Bazel has defconfig issues)"
-            exit 1
-          fi
-          
-          echo "✓ Kernel repo workspace ready with build.sh"
+    - name: Add SukiSU
+      if: ${{ inputs.kernelsu_variant == 'SukiSU' }}
+      run: |
+        curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
 
-      - name: Prepare defconfig
-        working-directory: common
-        run: |
-          set -e
-          rm -rf security/baseband-guard || true
-          sed -i '/baseband_guard/d' security/Kconfig || true
-          echo "✓ Defconfig prepared"
+    # --------------------------------------------------
+    # HARD REMOVE KERNELSU ALLOWLIST (GKI FIX)
+    # --------------------------------------------------
+    - name: Remove KernelSU allowlist completely
+      working-directory: common
+      run: |
+        rm -f drivers/kernelsu/allowlist.c
+        rm -f drivers/kernelsu/app_profile.c
+        echo "✓ KernelSU allowlist removed"
 
-      # --------------------------------------------------
-      # DEPENDENCIES
-      # --------------------------------------------------
-      - name: Clone SUSFS + AnyKernel3
-        run: |
-          git clone https://github.com/ShirkNeko/susfs4ksu.git -b gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}
-          git clone https://github.com/MiRinChan/AnyKernel3.git
+    # --------------------------------------------------
+    # SUSFS
+    # --------------------------------------------------
+    - name: Apply SUSFS patch
+      working-directory: common
+      run: |
+        patch -p1 < "$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch" || true
+        rm -f fs/proc/*.rej || true
 
-      # --------------------------------------------------
-      # KERNELSU BRANCH
-      # --------------------------------------------------
-      - name: Determine KernelSU branch
-        run: |
-          if [[ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]]; then
-            if [[ "${{ inputs.kernelsu_branch }}" == "Other" ]]; then
-              echo "BRANCH=${{ inputs.kernelsu_branch_other }}" >> $GITHUB_ENV
-            else
-              echo "BRANCH=builtin" >> $GITHUB_ENV
-            fi
-          fi
+    - name: Copy SUSFS files
+      run: |
+        cp susfs4ksu/kernel_patches/fs/* common/fs/
+        cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/
 
-      # --------------------------------------------------
-      # KERNELSU (SUKISU)
-      # --------------------------------------------------
-      - name: Add SukiSU
-        if: ${{ inputs.kernelsu_variant == 'SukiSU' }}
-        run: |
-          curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s "$BRANCH"
+    # --------------------------------------------------
+    # DEFCONFIG (DIRECT, GKI-SAFE)
+    # --------------------------------------------------
+    - name: Patch gki_defconfig
+      working-directory: common
+      run: |
+        DEFCONFIG=arch/arm64/configs/gki_defconfig
 
-      - name: HARD remove KernelSU allowlist (GKI REQUIRED)
-        run: |
-          cd common
-          
-          echo ">>> Removing KernelSU allowlist sources (GKI-safe)"
-          
-          rm -f drivers/kernelsu/allowlist.c
-          rm -f drivers/kernelsu/app_profile.c
-          
-          if ls drivers/kernelsu 2>/dev/null | grep -q allowlist; then
-            echo "❌ allowlist still present"
-            exit 1
-          fi
-          
-          echo "✓ KernelSU allowlist completely removed"
+        sed -i '/^CONFIG_KSU/d' "$DEFCONFIG"
+        sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
+        sed -i '/^CONFIG_CFG80211/d' "$DEFCONFIG"
+        sed -i '/^CONFIG_MAC80211/d' "$DEFCONFIG"
+        sed -i '/^CONFIG_USB_GADGET/d' "$DEFCONFIG"
 
-      - name: Disable KernelSU allowlist (GKI-safe)
-        run: |
-          cd common
-          
-          sed -i 's/CONFIG_KSU_ALLOWLIST=y/CONFIG_KSU_ALLOWLIST=n/' drivers/kernelsu/Kconfig || true
-          sed -i 's/CONFIG_KSU_ALLOWLIST_WORKAROUND=y/CONFIG_KSU_ALLOWLIST_WORKAROUND=n/' drivers/kernelsu/Kconfig || true
-          sed -i 's/CONFIG_KSU_ALLOWLIST is not set/CONFIG_KSU_ALLOWLIST=n/' drivers/kernelsu/Kconfig || true
-          
-          echo "✓ KernelSU allowlist disabled in Kconfig"
+        cat >> "$DEFCONFIG" << 'EOF'
 
-      # --------------------------------------------------
-      # SUSFS (PATCH ONLY)
-      # --------------------------------------------------
-      - name: Apply SUSFS core patch
-        working-directory: common
-        run: |
-          set -e
-          PATCH="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
-          patch -p1 < "$PATCH" || true
-          rm -f fs/proc/*.rej || true
-          echo "✓ SUSFS patch applied"
+        CONFIG_KSU=y
+        CONFIG_KSU_MANUAL_HOOK=y
+        CONFIG_KSU_KPROBES_HOOK=n
 
-      - name: Copy SUSFS files
-        run: |
-          cp susfs4ksu/kernel_patches/fs/* common/fs/
-          cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/
-          echo "✓ SUSFS files copied"
+        CONFIG_SUSFS=y
+        CONFIG_KSU_SUSFS=y
+        CONFIG_SUSFS_PROC=y
+        CONFIG_SUSFS_MAGIC_MOUNT=y
+        CONFIG_SUSFS_AUTO_BIND=y
+        CONFIG_SUSFS_SUS_PATH=y
 
-      # --------------------------------------------------
-      # GKI DEFCONFIG - DIRECT WRITE
-      # --------------------------------------------------
-      - name: Add configs directly to defconfig
-        working-directory: common
-        run: |
-          set -e
-          DEFCONFIG="arch/arm64/configs/gki_defconfig"
-          
-          echo "==> Adding KernelSU + SUSFS + NetHunter configs"
-          
-          # Remove existing
-          sed -i '/^CONFIG_KSU/d' "$DEFCONFIG"
-          sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG"
-          sed -i '/^CONFIG_USB_GADGET/d' "$DEFCONFIG"
-          sed -i '/^CONFIG_USB_CONFIGFS/d' "$DEFCONFIG"
-          sed -i '/^CONFIG_TCP_CONG_BBR/d' "$DEFCONFIG"
-          sed -i '/^CONFIG_IP_SET/d' "$DEFCONFIG"
-          
-          # Add all configs at the end
-          cat >> "$DEFCONFIG" << 'EOF'
-          
-          # KernelSU Core
-          CONFIG_KSU=y
-          CONFIG_KSU_MANUAL_HOOK=y
-          CONFIG_KSU_KPROBES_HOOK=n
-          
-          # SUSFS Integration
-          CONFIG_SUSFS=y
-          CONFIG_KSU_SUSFS=y
-          CONFIG_SUSFS_PROC=y
-          CONFIG_SUSFS_MAGIC_MOUNT=y
-          CONFIG_SUSFS_AUTO_BIND=y
-          CONFIG_SUSFS_SUS_PATH=y
-          
-          # WiFi/Bluetooth
-          CONFIG_CFG80211=m
-          CONFIG_MAC80211=m
-          
-          # USB Gadget & Networking (NetHunter)
-          CONFIG_USB_GADGET=y
-          CONFIG_USB_CONFIGFS=y
-          CONFIG_USB_NET_DRIVERS=y
-          CONFIG_USB_RNDIS_HOST=m
-          CONFIG_USB_NET_CDC_ECM=m
-          CONFIG_USB_NET_CDC_NCM=m
-          CONFIG_USB_HID=m
-          CONFIG_USB_HIDDEV=y
-          
-          # Filesystem
-          CONFIG_TMPFS_XATTR=y
-          CONFIG_TMPFS_POSIX_ACL=y
-          
-          # BBR TCP
-          CONFIG_TCP_CONG_BBR=y
-          CONFIG_NET_SCH_FQ=y
-          CONFIG_DEFAULT_BBR=y
-          CONFIG_TCP_CONG_ADVANCED=y
-          CONFIG_TCP_CONG_BIC=n
-          CONFIG_TCP_CONG_WESTWOOD=n
-          CONFIG_TCP_CONG_HTCP=n
-          
-          # TTL/HL Manipulation
-          CONFIG_IP_NF_TARGET_TTL=y
-          CONFIG_IP6_NF_TARGET_HL=y
-          CONFIG_IP6_NF_MATCH_HL=y
-          
-          # IPSet Support
-          CONFIG_IP_SET=y
-          CONFIG_IP_SET_MAX=65534
-          CONFIG_IP_SET_BITMAP_IP=y
-          CONFIG_IP_SET_BITMAP_IPMAC=y
-          CONFIG_IP_SET_BITMAP_PORT=y
-          CONFIG_IP_SET_HASH_IP=y
-          CONFIG_IP_SET_HASH_IPMARK=y
-          CONFIG_IP_SET_HASH_IPPORT=y
-          CONFIG_IP_SET_HASH_IPPORTIP=y
-          CONFIG_IP_SET_HASH_IPPORTNET=y
-          CONFIG_IP_SET_HASH_IPMAC=y
-          CONFIG_IP_SET_HASH_MAC=y
-          CONFIG_IP_SET_HASH_NETPORTNET=y
-          CONFIG_IP_SET_HASH_NET=y
-          CONFIG_IP_SET_HASH_NETNET=y
-          CONFIG_IP_SET_HASH_NETPORT=y
-          CONFIG_IP_SET_HASH_NETIFACE=y
-          CONFIG_IP_SET_LIST_SET=y
-          EOF
-          
-          echo "✓ All configs added to defconfig"
+        CONFIG_CFG80211=m
+        CONFIG_MAC80211=m
 
-      - name: Disable defconfig validation
-        working-directory: common
-        run: |
-          set -e
-          
-          sed -i 's/POST_DEFCONFIG_CMDS=.*/POST_DEFCONFIG_CMDS=""/g' build.config.gki.aarch64 || true
-          sed -i 's/PRE_DEFCONFIG_CMDS=.*/PRE_DEFCONFIG_CMDS=""/g' build.config.gki.aarch64 || true
-          
-          echo "✓ Defconfig validation disabled"
+        CONFIG_USB_GADGET=y
+        CONFIG_USB_CONFIGFS=y
+        CONFIG_USB_NET_DRIVERS=y
+        CONFIG_USB_RNDIS_HOST=m
+        CONFIG_USB_NET_CDC_ECM=m
+        CONFIG_USB_NET_CDC_NCM=m
+        CONFIG_USB_HID=m
+        CONFIG_USB_HIDDEV=y
 
-      # --------------------------------------------------
-      # BUILD
-      # --------------------------------------------------
-      - name: Build with retry (keepalive)
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 90
-          max_attempts: 2
-          retry_on: timeout
-          command: |
-            cd "$GITHUB_WORKSPACE"
-            
-            # Keepalive
-            start_keepalive() {
-              ( while sleep 300; do
-                  echo "[keepalive] build still running at $(date -u)"
-                done ) &
-              KEEPALIVE_PID=$!
-              echo "Keepalive started with PID: $KEEPALIVE_PID"
-            }
-            
-            stop_keepalive() {
-              if [ -n "${KEEPALIVE_PID:-}" ] && kill -0 "$KEEPALIVE_PID" 2>/dev/null; then
-                echo "Stopping keepalive (PID: $KEEPALIVE_PID)"
-                kill "$KEEPALIVE_PID" 2>/dev/null || true
-                wait "$KEEPALIVE_PID" 2>/dev/null || true
-              fi
-            }
-            
-            trap stop_keepalive EXIT INT TERM
-            start_keepalive
-            
-            # Build-Config Fixes
-            set -e
-            
-            sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
-            sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64 || true
-            sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
-            
-            # Force build.sh (NO Bazel!)
-            LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 \
-              SKIP_DEFCONFIG_CHECK=1 \
-              build/build.sh CC="/usr/bin/ccache clang"
-            
-            echo "Build completed successfully"
+        CONFIG_TCP_CONG_BBR=y
+        CONFIG_NET_SCH_FQ=y
+        CONFIG_DEFAULT_BBR=y
+        EOF
 
-      # --------------------------------------------------
-      # CCACHE STATS
-      # --------------------------------------------------
-      - name: Show ccache stats
-        run: ccache --show-stats
+    # --------------------------------------------------
+    # BUILD (build.sh ONLY)
+    # --------------------------------------------------
+    - name: Build kernel (keepalive)
+      uses: nick-fields/retry@v3
+      with:
+        timeout_minutes: 90
+        max_attempts: 2
+        retry_on: timeout
+        command: |
+          cd "$GITHUB_WORKSPACE"
 
-      # --------------------------------------------------
-      # PACKAGE
-      # --------------------------------------------------
-      - name: Package AnyKernel3
-        run: |
-          set -e
-          IMG=$(find out -name Image 2>/dev/null | head -1)
-          test -f "$IMG" || { echo "ERROR: Image not found!"; exit 1; }
-          
-          echo "Using kernel image: $IMG"
-          cp "$IMG" AnyKernel3/Image
-          
-          mkdir -p AnyKernel3/modules/vendor/lib/modules
-          find out -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
-          
-          cd AnyKernel3
-          zip -r ../kernel.zip .
-          
-          echo "✓ Kernel packaged successfully"
+          ( while sleep 300; do
+              echo "[keepalive] build running $(date -u)"
+            done ) &
+          KEEPALIVE_PID=$!
+          trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel
-          path: kernel.zip
+          sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
+          sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' common/build.config.gki.aarch64 || true
+          sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' common/build.config.gki.aarch64 || true
 
-      - name: Save repo cache
-        if: steps.repo-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            .repo
-            common
-            build
-            prebuilts
-          key: repo-full-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}
+          LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 \
+            SKIP_DEFCONFIG_CHECK=1 \
+            build/build.sh CC="/usr/bin/ccache clang"
 
-      - name: Save ccache
-        uses: actions/cache/save@v4
-        with:
-          path: /home/runner/.ccache
-          key: ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}-${{ github.run_id }}
+    # --------------------------------------------------
+    # PACKAGE
+    # --------------------------------------------------
+    - name: Package AnyKernel3
+      run: |
+        IMG=$(find out -name Image | head -1)
+        cp "$IMG" AnyKernel3/Image
+        cd AnyKernel3
+        zip -r ../kernel.zip .
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel
+        path: kernel.zip
