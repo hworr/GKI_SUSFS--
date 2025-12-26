@@ -153,7 +153,47 @@ jobs:
             exit 1
           fi
           
-          echo "KernelSU allowlist completely removed"
+             echo "KernelSU allowlist completely removed"
+           - name: Create SUSFS stub (required for new SUSFS layout)
+             run: |
+              set -e
+          
+              echo "==> Creating SUSFS stub"
+          
+              mkdir -p common/fs/susfs
+          
+              cat > common/fs/susfs/Makefile << 'EOF'
+          obj-$(CONFIG_SUSFS) += susfs.o
+          susfs-y := sus_su.o
+          EOF
+          
+              cat > common/fs/susfs/Kconfig << 'EOF'
+          config SUSFS
+              bool "SUSFS support"
+              depends on KSU
+              default y
+          EOF
+          
+              cat > common/fs/susfs/sus_su.c << 'EOF'
+          #include <linux/module.h>
+          #include <linux/susfs.h>
+          
+          bool susfs_is_current_proc_umounted(void)
+          {
+              return false;
+          }
+          EXPORT_SYMBOL(susfs_is_current_proc_umounted);
+          EOF
+          
+              if ! grep -q 'fs/susfs' common/fs/Kconfig; then
+                echo 'source "fs/susfs/Kconfig"' >> common/fs/Kconfig
+              fi
+          
+              if ! grep -q 'susfs' common/fs/Makefile; then
+                echo 'obj-$(CONFIG_SUSFS) += susfs/' >> common/fs/Makefile
+              fi
+          
+              echo "✓ SUSFS stub created"
 
       - name: Apply SUSFS patch
         working-directory: common
