@@ -71,11 +71,10 @@ jobs:
 
     steps:
       - name: Set GKI branch
-        run: |
-          set -e
-          BRANCH="${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-${{ env.OS_PATCH_LEVEL }}"
-          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
-          echo "Using branch: common-$BRANCH"
+  run: |
+    BRANCH="android${ANDROID_VERSION}-${KERNEL_VERSION}-${OS_PATCH_LEVEL}"
+    # ← Verwendet Shell-Variablen die aus dem env: Block kommen
+    echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
 
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
