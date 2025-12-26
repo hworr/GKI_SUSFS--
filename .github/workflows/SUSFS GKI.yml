@@ -1,4 +1,4 @@
-name: SukiSU Kernel Build (GKI Fixed)
+name: SukiSU + SUSFS Kernel Build
 
 permissions:
   contents: write
@@ -164,11 +164,9 @@ jobs:
           
           echo "==> Pre-configuring SUSFS markers (so KernelSU detects it)"
           
-          # Remove any existing KSU/SUSFS config
           sed -i '/^CONFIG_KSU/d' "$DEFCONFIG" 2>/dev/null || true
           sed -i '/^CONFIG_SUSFS/d' "$DEFCONFIG" 2>/dev/null || true
           
-          # Add minimal SUSFS markers
           cat >> "$DEFCONFIG" << 'EOF'
           CONFIG_SUSFS=y
           CONFIG_KSU_SUSFS=y
@@ -362,20 +360,15 @@ jobs:
           find common -name "*.c" -o -name "*.h" | xargs sed -i \
             's|#include <security/selinux/include/security.h>|#if IS_ENABLED(CONFIG_SECURITY_SELINUX)\n&\n#endif|g' || true
 
-      - name: Prepare defconfig and clean tree
+      - name: Prepare defconfig
         working-directory: common
         run: |
           set -e
           
-          # Remove baseband-guard
           rm -rf security/baseband-guard || true
           sed -i '/baseband_guard/d' security/Kconfig || true
           
-          # CRITICAL: Clean tree BEFORE config generation
-          echo "==> Cleaning tree BEFORE config"
-          make mrproper || true
-          
-          echo "✓ Tree prepared and cleaned"
+          echo "✓ Defconfig prepared"
 
       - name: Create config fragment
         run: |
@@ -452,6 +445,9 @@ jobs:
             ( while sleep 300; do echo "[keepalive] $(date)"; done ) &
             KEEPALIVE_PID=$!
             trap "kill $KEEPALIVE_PID 2>/dev/null || true" EXIT
+            
+            # Clean the tree first
+            cd common && make mrproper && cd ..
             
             sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' common/build.config.gki.aarch64 || true
             sed -i '/MODULES_ORDER/d' common/build.config.gki.aarch64 || true
