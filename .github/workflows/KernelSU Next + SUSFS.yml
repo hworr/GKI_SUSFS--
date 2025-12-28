@@ -118,8 +118,8 @@ jobs:
       run: |
             cd kernel
             
-            BRANCH="${{ steps.vars.outputs.BRANCH }}"
-            SUSFS_BRANCH="gki-${BRANCH}"
+            SUSFS_BRANCH="gki-${{ inputs.kernel_version }}"
+            echo "Using SUSFS branch: $SUSFS_BRANCH"
             
             echo "Cloning SUSFS branch: ${SUSFS_BRANCH}..."
             
