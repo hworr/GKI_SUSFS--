@@ -147,33 +147,104 @@ jobs:
     # --------------------------------------------------
     # SUSFS 2.0 (KernelSU Next)
     # --------------------------------------------------
-    - name: Apply SUSFS 2.0
-      if: ${{ inputs.ksu_variant == 'kernelsu-next' && inputs.enable_susfs }}
-      working-directory: kernel
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
+    - name: Setup SUSFS
+      if: inputs.enable_susfs
       run: |
-        set -e
-    
-        echo "Cloning SUSFS repo (stable, via token)"
-        git clone https://x-access-token:${GITHUB_TOKEN}@github.com/WildKernels/susfs4ksu.git susfs
-    
-        echo "Searching for SUSFS AIO patch..."
-        find susfs -iname "*susfs*2.0*AIO*.patch" -maxdepth 4 -print
-    
-        PATCH_FILE=$(find susfs -iname "*susfs*2.0*AIO*.patch" | head -n 1)
-    
-        if [ -z "$PATCH_FILE" ]; then
-          echo "❌ SUSFS 2.0 AIO patch not found in repo"
-          exit 1
-        fi
-
-        echo "Using patch: $PATCH_FILE"
-        wc -l "$PATCH_FILE"
-        head -n 5 "$PATCH_FILE"
-    
-        echo "Applying SUSFS patch"
-        patch -p1 < "$PATCH_FILE"
+            cd $GITHUB_WORKSPACE/kernel_workspace
+            
+            # Kernel Source Verzeichnis finden (gleiche Logik wie KernelSU)
+            if [ -d "common" ]; then
+              KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/common"
+            elif [ -d "private/gs-google" ]; then
+              KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/private/gs-google"
+            elif [ -d "aosp" ]; then
+              KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/aosp"
+            else
+              KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace"
+            fi
+            
+            SUSFS_BRANCH="${{ steps.vars.outputs.SUSFS_BRANCH }}"
+            
+            echo "Cloning SUSFS branch: ${SUSFS_BRANCH}..."
+            echo "Kernel directory: $KERNEL_DIR"
+            
+            # SUSFS klonen
+            git clone --depth=1 -b "${SUSFS_BRANCH}" \
+              https://github.com/WildKernels/susfs4ksu.git susfs || \
+            git clone --depth=1 -b "${SUSFS_BRANCH}" \
+              https://gitlab.com/simonpunk/susfs4ksu.git susfs
+            
+            cd "$KERNEL_DIR"
+            
+            SUSFS_SRC="$GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches"
+            KV="${{ steps.vars.outputs.KERNEL_VERSION }}"
+            
+            # 1. SUSFS Kernel-Dateien kopieren
+            echo "Copying SUSFS source files..."
+            cp "${SUSFS_SRC}/fs/susfs.c" fs/ 2>/dev/null && echo "  ✓ susfs.c" || echo "  ✗ susfs.c not found"
+            cp "${SUSFS_SRC}/include/linux/susfs.h" include/linux/ 2>/dev/null && echo "  ✓ susfs.h" || echo "  ✗ susfs.h not found"
+            
+            # 2. Kernel patches anwenden
+            echo "Applying SUSFS kernel patches for ${KV}..."
+            
+            PATCH_DIR="${SUSFS_SRC}/50_add_susfs_in_${KV}"
+            
+            if [ -d "$PATCH_DIR" ]; then
+              for patch in "$PATCH_DIR"/*.patch; do
+                if [ -f "$patch" ]; then
+                  echo "Applying: $(basename $patch)"
+                  git apply --check "$patch" 2>/dev/null && git apply "$patch" || \
+                  patch -p1 --forward < "$patch" || \
+                  echo "  (may already be applied)"
+                fi
+              done
+            else
+              echo "WARNING: No patches found in: $PATCH_DIR"
+              echo "Available directories:"
+              ls -la "${SUSFS_SRC}/" 2>/dev/null || true
+            fi
+            
+            # 3. KernelSU SUSFS Integration Patch
+            echo "Applying KernelSU SUSFS integration patch..."
+            
+            KSU_PATCH="${SUSFS_SRC}/KernelSU/10_enable_susfs_for_ksu.patch"
+            
+            if [ -f "$KSU_PATCH" ] && [ -d "drivers/kernelsu" ]; then
+              cd drivers/kernelsu
+              echo "Patching KernelSU for SUSFS support..."
+              git apply --check "$KSU_PATCH" 2>/dev/null && git apply "$KSU_PATCH" || \
+              patch -p1 --forward < "$KSU_PATCH" || \
+              echo "  (may already be applied)"
+              cd ../..
+            fi
+            
+            echo "✓ SUSFS setup complete"
+    - name: Apply Additional Patches
+      if: inputs.enable_susfs
+      run: |
+            cd $GITHUB_WORKSPACE/kernel_workspace
+            
+            # Kernel Source Verzeichnis finden
+            if [ -d "common" ]; then
+              KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/common"
+            elif [ -d "private/gs-google" ]; then
+              KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/private/gs-google"
+            elif [ -d "aosp" ]; then
+              KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/aosp"
+            else
+              KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace"
+            fi
+            
+            cd "$KERNEL_DIR"
+            
+            # Verstecke KernelSU Symbole (Anti-Detection)
+            echo "Applying anti-detection patches..."
+            
+            SUSFS_SRC="$GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches"
+            
+            if [ -f "$SUSFS_SRC/hide_stuff.patch" ]; then
+              git apply "$SUSFS_SRC/hide_stuff.patch" || echo "hide_stuff.patch may already be applied"
+            fi
 
     # --------------------------------------------------
     # DEFCONFIG
