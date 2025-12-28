@@ -115,19 +115,18 @@ jobs:
     # SUSFS 2.0 (KERNELSU NEXT ONLY)
     # --------------------------------------------------
     - name: Apply SUSFS 2.0 (KernelSU Next)
+      if: ${{ inputs.ksu_variant == 'kernelsu-next' && inputs.enable_susfs }}
+      working-directory: kernel
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
-            cd kernel
-            
-            SUSFS_BRANCH="gki-${{ inputs.kernel_version }}"
-            echo "Using SUSFS branch: $SUSFS_BRANCH"
-            
-            echo "Cloning SUSFS branch: ${SUSFS_BRANCH}..."
-            
-            # SUSFS von WildKernels (deren Fork ist aktueller)
-            git clone --depth=1 -b "${SUSFS_BRANCH}" \
-              https://github.com/WildKernels/susfs4ksu.git susfs || \
-            git clone --depth=1 -b "${SUSFS_BRANCH}" \
-              https://gitlab.com/simonpunk/susfs4ksu.git susfs
+        set -e
+    
+        echo "Cloning SUSFS (default branch)"
+        git clone https://x-access-token:${GITHUB_TOKEN}@github.com/sidex15/susfs.git
+    
+        echo "Applying SUSFS 2.0 AIO patch"
+        patch -p1 < susfs/kernel_patches/susfs-2.0-AIO.patch
             
             cd common
             
