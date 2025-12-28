@@ -181,7 +181,6 @@ jobs:
             cp "$KBUILD_FILE" "$KBUILD_FILE.bak"
             
             # 1. Entferne alle shell-basierten Versionsabfragen komplett
-            # Diese Zeilen verursachen den Fallback auf v0.0.1
             sed -i '/KSU_GIT_VERSION\s*:=\s*\$(shell/d' "$KBUILD_FILE"
             sed -i '/KSU_VERSION_TAG\s*:=\s*\$(shell/d' "$KBUILD_FILE"
             
@@ -189,20 +188,28 @@ jobs:
             sed -i '/ifeq.*KSU_GIT_VERSION/,/endif/d' "$KBUILD_FILE"
             sed -i '/ifeq.*KSU_VERSION_TAG/,/endif/d' "$KBUILD_FILE"
             
-            # 3. Entferne bestehende KSU_VERSION Definitionen
-            sed -i '/ccflags-y += -DKSU_VERSION=/d' "$KBUILD_FILE"
-            sed -i '/ccflags-y += -DKSU_GIT_VERSION=/d' "$KBUILD_FILE"
-            sed -i '/-DKSU_VERSION_TAG=/d' "$KBUILD_FILE"
+            # 3. Entferne bestehende Definitionen
+            sed -i '/ccflags-y += -DKSU_VERSION/d' "$KBUILD_FILE"
+            sed -i '/ccflags-y += -DKSU_GIT_VERSION/d' "$KBUILD_FILE"
+            sed -i '/-DKSU_VERSION_TAG/d' "$KBUILD_FILE"
             
             # 4. Entferne warning Nachrichten
             sed -i '/KSU_GIT_VERSION not defined/d' "$KBUILD_FILE"
             sed -i '/KSU_VERSION_TAG not defined/d' "$KBUILD_FILE"
             
-            # 5. Füge unsere feste Version am Anfang ein (NUR EINMAL!)
-            sed -i "1i # KernelSU Version: $KSU_VERSION (patched by workflow)" "$KBUILD_FILE"
-            sed -i "2i KSU_GIT_VERSION := $KSU_COMMITS" "$KBUILD_FILE"
-            sed -i "3i KSU_VERSION_TAG := $KSU_VERSION" "$KBUILD_FILE"
-            sed -i "4i ccflags-y += -DKSU_VERSION=\$(KSU_GIT_VERSION)" "$KBUILD_FILE"
+            # 5. Füge am Anfang unsere festen Werte ein
+            # WICHTIG: KSU_VERSION_TAG muss als String-Literal definiert werden!
+            {
+              echo "# KernelSU Version: $KSU_VERSION (patched by workflow)"
+              echo "KSU_GIT_VERSION := $KSU_COMMITS"
+              echo "ccflags-y += -DKSU_VERSION=\$(KSU_GIT_VERSION)"
+              echo "ccflags-y += -DKSU_VERSION_TAG=\\\"$KSU_VERSION\\\""
+              echo ""
+            } > "$KBUILD_FILE.new"
+            
+            # Ursprüngliche Datei (ohne die entfernten Zeilen) anhängen
+            cat "$KBUILD_FILE" >> "$KBUILD_FILE.new"
+            mv "$KBUILD_FILE.new" "$KBUILD_FILE"
             
             echo ""
             echo "=== Patched Kbuild (first 30 lines) ==="
