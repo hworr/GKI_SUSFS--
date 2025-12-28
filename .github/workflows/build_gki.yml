@@ -172,49 +172,65 @@ jobs:
           rm -rf drivers/kernelsu
           cp -r KernelSU/kernel drivers/kernelsu
           
-          # Version in Kbuild hardcoden - ERSETZEN nicht hinzufügen!
+          # Version in Kbuild hardcoden
           KBUILD_FILE="drivers/kernelsu/Kbuild"
           if [ -f "$KBUILD_FILE" ]; then
             echo "Patching Kbuild with version $KSU_VERSION ($KSU_COMMITS commits)..."
             
             # Backup
-            cp "$KBUILD_FILE" "$KBUILD_FILE.bak"
+            cp "$KBUILD_FILE" "$KBUILD_FILE.original"
             
-            # 1. Entferne alle shell-basierten Versionsabfragen komplett
-            sed -i '/KSU_GIT_VERSION\s*:=\s*\$(shell/d' "$KBUILD_FILE"
-            sed -i '/KSU_VERSION_TAG\s*:=\s*\$(shell/d' "$KBUILD_FILE"
+            # Zeige originale Kbuild für Debugging
+            echo "=== Original Kbuild (first 80 lines) ==="
+            head -80 "$KBUILD_FILE"
+            echo "========================================="
             
-            # 2. Entferne die Fallback-Logik (ifeq/endif Blöcke für Version)
-            sed -i '/ifeq.*KSU_GIT_VERSION/,/endif/d' "$KBUILD_FILE"
-            sed -i '/ifeq.*KSU_VERSION_TAG/,/endif/d' "$KBUILD_FILE"
+            # Methode: Ersetze die komplette Datei, aber behalte die obj-Zeilen
+            # Extrahiere alle Zeilen die NICHT mit Version zu tun haben
+            grep -v -E "(KSU_GIT_VERSION|KSU_VERSION|version|ifeq|endif|shell.*git|warning|info.*fallback)" "$KBUILD_FILE" > "$KBUILD_FILE.cleaned" || true
             
-            # 3. Entferne bestehende Definitionen
-            sed -i '/ccflags-y += -DKSU_VERSION/d' "$KBUILD_FILE"
-            sed -i '/ccflags-y += -DKSU_GIT_VERSION/d' "$KBUILD_FILE"
-            sed -i '/-DKSU_VERSION_TAG/d' "$KBUILD_FILE"
-            
-            # 4. Entferne warning Nachrichten
-            sed -i '/KSU_GIT_VERSION not defined/d' "$KBUILD_FILE"
-            sed -i '/KSU_VERSION_TAG not defined/d' "$KBUILD_FILE"
-            
-            # 5. Füge am Anfang unsere festen Werte ein
-            # WICHTIG: KSU_VERSION_TAG muss als String-Literal definiert werden!
+            # Erstelle neue Kbuild mit fester Version am Anfang
             {
-              echo "# KernelSU Version: $KSU_VERSION (patched by workflow)"
-              echo "KSU_GIT_VERSION := $KSU_COMMITS"
-              echo "ccflags-y += -DKSU_VERSION=\$(KSU_GIT_VERSION)"
-              echo "ccflags-y += -DKSU_VERSION_TAG=\\\"$KSU_VERSION\\\""
+              echo "# KernelSU-Next Kbuild - Patched by workflow"
+              echo "# Version: $KSU_VERSION ($KSU_COMMITS commits)"
               echo ""
+              echo "ccflags-y += -DKSU_VERSION=$KSU_COMMITS"
+              echo 'ccflags-y += -DKSU_VERSION_TAG=\"'"$KSU_VERSION"'\"'
+              echo ""
+              cat "$KBUILD_FILE.cleaned"
             } > "$KBUILD_FILE.new"
             
-            # Ursprüngliche Datei (ohne die entfernten Zeilen) anhängen
-            cat "$KBUILD_FILE" >> "$KBUILD_FILE.new"
             mv "$KBUILD_FILE.new" "$KBUILD_FILE"
+            rm -f "$KBUILD_FILE.cleaned"
             
             echo ""
-            echo "=== Patched Kbuild (first 30 lines) ==="
-            head -30 "$KBUILD_FILE"
-            echo "========================================"
+            echo "=== Patched Kbuild ==="
+            cat "$KBUILD_FILE"
+            echo "======================"
+          fi
+          
+          # ZUSÄTZLICH: Falls es ein Makefile gibt, auch dort patchen
+          KSU_MAKEFILE="drivers/kernelsu/Makefile"
+          if [ -f "$KSU_MAKEFILE" ]; then
+            echo "Also patching Makefile..."
+            sed -i "s/\$(shell.*git.*describe.*)/$KSU_VERSION/g" "$KSU_MAKEFILE" || true
+            sed -i "s/\$(shell.*rev-list.*count.*)/$KSU_COMMITS/g" "$KSU_MAKEFILE" || true
+          fi
+          
+          # ZUSÄTZLICH: ksu.h patchen falls die Version dort definiert ist
+          KSU_H="drivers/kernelsu/ksu.h"
+          if [ -f "$KSU_H" ]; then
+            echo "Patching ksu.h..."
+            # Zeige original
+            echo "=== Original ksu.h (grep VERSION) ==="
+            grep -i "VERSION" "$KSU_H" || echo "(keine VERSION Zeilen gefunden)"
+            
+            # Ersetze die Makros
+            sed -i "s/#define KERNEL_SU_VERSION.*/#define KERNEL_SU_VERSION $KSU_COMMITS/" "$KSU_H" || true
+            sed -i 's/#define KERNEL_SU_VERSION_TAG.*/#define KERNEL_SU_VERSION_TAG "'"$KSU_VERSION"'"/' "$KSU_H" || true
+            
+            # Falls KSU_VERSION_TAG über KSU_VERSION_TAG referenziert wird
+            sed -i "s/KSU_VERSION_TAG$/\"$KSU_VERSION\"/" "$KSU_H" || true
           fi
           
           # Makefile in drivers/Makefile hinzufügen
