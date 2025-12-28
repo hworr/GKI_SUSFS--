@@ -604,40 +604,40 @@ jobs:
               
               # Erstelle ein temporäres Python script für präzises Patching
               python3 << 'PYTHON_SCRIPT'
-import re
+            import re
+            
+            with open('drivers/kernelsu/Kconfig', 'r') as f:
+                content = f.read()
+            
+            # Für jede config Option: füge "default y" hinzu falls nicht vorhanden
+            configs = re.findall(r'config (KSU_SUSFS\w*|KSU)\b', content)
+            print(f"Found configs: {configs}")
+            
+            for config in set(configs):
+                # Prüfe ob bereits default y hat
+                pattern = rf'(config {config}\s+(?:tristate|bool)[^\n]*\n)'
+                match = re.search(pattern, content)
+                if match:
+                    # Prüfe ob default y schon vorhanden ist
+                    config_block_start = match.end()
+                    next_config = content.find('config ', config_block_start)
+                    if next_config == -1:
+                        next_config = len(content)
+                    config_block = content[config_block_start:next_config]
+                    
+                    if 'default y' not in config_block:
+                        # Füge default y nach der bool/tristate Zeile ein
+                        replacement = match.group(1) + '\tdefault y\n'
+                        content = content[:match.start()] + replacement + content[match.end():]
+                        print(f"Added default y to {config}")
+                    else:
+                        print(f"{config} already has default y")
 
-with open('drivers/kernelsu/Kconfig', 'r') as f:
-    content = f.read()
-
-# Für jede config Option: füge "default y" hinzu falls nicht vorhanden
-configs = re.findall(r'config (KSU_SUSFS\w*|KSU)\b', content)
-print(f"Found configs: {configs}")
-
-for config in set(configs):
-    # Prüfe ob bereits default y hat
-    pattern = rf'(config {config}\s+(?:tristate|bool)[^\n]*\n)'
-    match = re.search(pattern, content)
-    if match:
-        # Prüfe ob default y schon vorhanden ist
-        config_block_start = match.end()
-        next_config = content.find('config ', config_block_start)
-        if next_config == -1:
-            next_config = len(content)
-        config_block = content[config_block_start:next_config]
-        
-        if 'default y' not in config_block:
-            # Füge default y nach der bool/tristate Zeile ein
-            replacement = match.group(1) + '\tdefault y\n'
-            content = content[:match.start()] + replacement + content[match.end():]
-            print(f"Added default y to {config}")
-        else:
-            print(f"{config} already has default y")
-
-with open('drivers/kernelsu/Kconfig', 'w') as f:
-    f.write(content)
-
-print("Kconfig updated successfully")
-PYTHON_SCRIPT
+                with open('drivers/kernelsu/Kconfig', 'w') as f:
+                    f.write(content)
+                
+                print("Kconfig updated successfully")
+                PYTHON_SCRIPT
               
               echo ""
               echo "=== Updated Kconfig (SUSFS section) ==="
