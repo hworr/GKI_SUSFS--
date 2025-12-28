@@ -112,65 +112,109 @@ jobs:
           case "$VARIANT" in
             "wild")
               echo "Installing Wild KSU..."
-              # Wild KSU mit vollem Git-History für Version
               git clone https://github.com/WildKernels/Wild_KSU.git KernelSU
-              cd KernelSU
-              git checkout wild
-              KSU_VERSION=$(git describe --abbrev=0 --tags 2>/dev/null || echo "v1.0.0")
-              cd ..
-              
-              # Integration
-              ln -sf "$(pwd)/KernelSU/kernel" "drivers/kernelsu"
+              cd KernelSU && git checkout wild && cd ..
               ;;
               
             "sukisu")
               echo "Installing SuKiSu..."
               git clone https://github.com/ShirkNeko/SuKiSu.git KernelSU
-              cd KernelSU
-              KSU_VERSION=$(git describe --abbrev=0 --tags 2>/dev/null || echo "v1.0.0")
-              cd ..
-              
-              ln -sf "$(pwd)/KernelSU/kernel" "drivers/kernelsu"
               ;;
               
             "next")
               echo "Installing KernelSU Next..."
-              # WICHTIG: Vollständiger Clone mit Tags für Versionserkennung!
               git clone --recurse-submodules https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
-              cd KernelSU
-              
-              # Alle Tags holen
-              git fetch --tags
-              
-              # Version ermitteln
-              KSU_VERSION=$(git describe --abbrev=0 --tags 2>/dev/null)
-              echo "KernelSU Next Version: $KSU_VERSION"
-              
-              cd ..
-              
-              # Symlink erstellen
-              ln -sf "$(pwd)/KernelSU/kernel" "drivers/kernelsu"
               ;;
           esac
           
-          # Kernel Makefile anpassen
-          if ! grep -q "CONFIG_KSU" drivers/Makefile 2>/dev/null; then
-            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+          # Version aus Git holen BEVOR wir was ändern
+          cd KernelSU
+          git fetch --tags
+          KSU_VERSION=$(git describe --abbrev=0 --tags 2>/dev/null || echo "v1.0.0")
+          KSU_VERSION_NUM=$(echo "$KSU_VERSION" | sed 's/v//g' | cut -d'-' -f1)
+          KSU_COMMITS=$(git rev-list --count HEAD 2>/dev/null || echo "1")
+          
+          echo "KernelSU Version: $KSU_VERSION"
+          echo "KernelSU Version Number: $KSU_VERSION_NUM"
+          echo "KernelSU Commits: $KSU_COMMITS"
+          cd ..
+          
+          # ============================================
+          # WICHTIG: Version manuell in Kbuild setzen
+          # Bazel Sandbox hat kein .git, also hardcoden!
+          # ============================================
+          
+          KBUILD_FILE="KernelSU/kernel/Kbuild"
+          
+          if [ -f "$KBUILD_FILE" ]; then
+            echo "Patching Kbuild with version info..."
+            
+            # Ersetze die git-basierten Versionsabfragen durch feste Werte
+            sed -i "s/KSU_GIT_VERSION := \$(shell .*/KSU_GIT_VERSION := $KSU_COMMITS/" "$KBUILD_FILE" || true
+            sed -i "s/ccflags-y += -DKSU_GIT_VERSION=.*/ccflags-y += -DKSU_GIT_VERSION=$KSU_COMMITS/" "$KBUILD_FILE" || true
+            
+            # Falls die Version über shell ermittelt wird, ersetzen
+            sed -i "s/\$(shell cd.*git describe.*/\"$KSU_VERSION\"/" "$KBUILD_FILE" || true
+            sed -i "s/\$(shell cd.*rev-list.*count.*HEAD.*)/$KSU_COMMITS/" "$KBUILD_FILE" || true
+            
+            # Direkt CFLAGS hinzufügen am Anfang der Datei
+            sed -i "1i ccflags-y += -DKSU_VERSION=$KSU_COMMITS" "$KBUILD_FILE"
+            
+            echo "Kbuild patched!"
+            head -20 "$KBUILD_FILE"
           fi
           
-          # Kconfig anpassen
-          if ! grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig 2>/dev/null; then
-            sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          # Auch Makefile prüfen
+          MAKEFILE="KernelSU/kernel/Makefile"
+          if [ -f "$MAKEFILE" ]; then
+            sed -i "s/\$(shell.*git.*describe.*/\"$KSU_VERSION\"/" "$MAKEFILE" || true
+            sed -i "s/\$(shell.*rev-list.*count.*)/$KSU_COMMITS/" "$MAKEFILE" || true
           fi
           
-          # Verify Installation
-          if [ -d "KernelSU" ] && [ -d "drivers/kernelsu" ]; then
-            echo "✓ KernelSU installed successfully"
-            echo "✓ Version: $(cd KernelSU && git describe --tags 2>/dev/null || echo 'unknown')"
-            echo "✓ Commit: $(cd KernelSU && git rev-parse --short HEAD)"
-          else
-            echo "✗ KernelSU installation failed!"
-            ls -la
+          # setup.sh für KernelSU Integration
+          cd KernelSU
+          if [ -f "kernel/setup.sh" ]; then
+            bash kernel/setup.sh ..
+          fi
+          cd ..
+          
+          # Falls setup.sh nicht funktioniert hat, manuell integrieren
+          if [ ! -d "drivers/kernelsu" ]; then
+            echo "Manual KernelSU integration..."
+            
+            # Kopiere statt Symlink (für Bazel)
+            cp -r KernelSU/kernel drivers/kernelsu
+            
+            # Makefile
+            if ! grep -q "CONFIG_KSU" drivers/Makefile 2>/dev/null; then
+              echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+            fi
+            
+            # Kconfig
+            if ! grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig 2>/dev/null; then
+              sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+            fi
+          fi
+          
+          # Version nochmal in der kopierten Version setzen
+          if [ -f "drivers/kernelsu/Kbuild" ]; then
+            sed -i "1i ccflags-y += -DKSU_VERSION=$KSU_COMMITS" "drivers/kernelsu/Kbuild"
+            sed -i "s/\$(shell.*git.*describe.*/\"$KSU_VERSION\"/" "drivers/kernelsu/Kbuild" || true
+            sed -i "s/\$(shell.*rev-list.*count.*)/$KSU_COMMITS/" "drivers/kernelsu/Kbuild" || true
+          fi
+          
+          # Verify
+          echo ""
+          echo "============================================"
+          echo "KernelSU Installation Summary:"
+          echo "  Variant: $VARIANT"
+          echo "  Version: $KSU_VERSION"
+          echo "  Commits: $KSU_COMMITS"
+          echo "  drivers/kernelsu exists: $([ -d drivers/kernelsu ] && echo 'YES' || echo 'NO')"
+          echo "============================================"
+          
+          if [ ! -d "drivers/kernelsu" ]; then
+            echo "ERROR: KernelSU integration failed!"
             exit 1
           fi
 
