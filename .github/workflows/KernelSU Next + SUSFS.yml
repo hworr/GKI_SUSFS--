@@ -83,10 +83,25 @@ jobs:
     # --------------------------------------------------
     # KERNEL SOURCE (FIXED BRANCH)
     # --------------------------------------------------
-    - name: Clone GKI kernel
+
+    - name: Download Kernel Source
       run: |
-        git clone https://android.googlesource.com/kernel/common \
-          -b ${BRANCH} kernel
+          cd $GITHUB_WORKSPACE
+          
+          BRANCH="${{ steps.vars.outputs.BRANCH }}"
+          
+          echo "Downloading manifest for ${BRANCH}..."
+          
+          # Manifest URL ermitteln
+          MANIFEST_URL="https://android.googlesource.com/kernel/manifest"
+          
+          mkdir -p kernel_workspace && cd kernel_workspace
+          
+          # Repo init
+          repo init -u $MANIFEST_URL -b common-${BRANCH} --depth=1
+          
+          # Sync
+          repo sync -c -j$(nproc) --no-tags --no-clone-bundle
 
     # --------------------------------------------------
     # KERNELSU (FINAL FIX)
