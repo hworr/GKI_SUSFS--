@@ -1,4 +1,4 @@
-name: KernelSU Next + SUSFS)
+name: GKI Kernel Build (WildKSU / SukiSU / KernelSU Next + SUSFS)
 
 permissions:
   contents: write
@@ -81,7 +81,7 @@ jobs:
         echo "Using branch: $BRANCH"
 
     # --------------------------------------------------
-    # KERNEL SOURCE (FIXED)
+    # KERNEL SOURCE (FIXED BRANCH)
     # --------------------------------------------------
     - name: Clone GKI kernel
       run: |
@@ -89,7 +89,7 @@ jobs:
           -b ${BRANCH} kernel
 
     # --------------------------------------------------
-    # KERNELSU
+    # KERNELSU (FIXED)
     # --------------------------------------------------
     - name: Apply KernelSU variant
       working-directory: kernel
@@ -114,15 +114,14 @@ jobs:
         esac
 
     # --------------------------------------------------
-    # SUSFS (KSU NEXT ONLY)
+    # SUSFS 2.0 (KERNELSU NEXT ONLY)
     # --------------------------------------------------
     - name: Apply SUSFS 2.0 (KernelSU Next)
       if: ${{ inputs.ksu_variant == 'kernelsu-next' && inputs.enable_susfs }}
       working-directory: kernel
       run: |
         git clone https://github.com/sidex15/susfs.git
-        cp susfs/kernel_patches/susfs-2.0-AIO.patch .
-        patch -p1 < susfs-2.0-AIO.patch
+        patch -p1 < susfs/kernel_patches/susfs-2.0-AIO.patch
 
     # --------------------------------------------------
     # DEFCONFIG
