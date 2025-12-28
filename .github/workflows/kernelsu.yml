@@ -232,29 +232,29 @@ jobs:
           if [ -f "$KCONFIG_FILE" ]; then
             # Füge default y für CONFIG_KSU hinzu
             python3 << 'PYTHON_SCRIPT'
-import re
-
-with open('drivers/kernelsu/Kconfig', 'r') as f:
-    content = f.read()
-
-# Suche nach "config KSU" und füge "default y" hinzu
-pattern = r'(config KSU\s+tristate[^\n]*\n)'
-match = re.search(pattern, content)
-if match:
-    # Prüfe ob default y schon vorhanden
-    rest = content[match.end():match.end()+200]
-    if 'default y' not in rest.split('config ')[0]:
-        replacement = match.group(1) + '\tdefault y\n'
-        content = content[:match.start()] + replacement + content[match.end():]
-        print("Added default y to CONFIG_KSU")
-    else:
-        print("CONFIG_KSU already has default y")
-else:
-    print("config KSU not found in Kconfig")
-
-with open('drivers/kernelsu/Kconfig', 'w') as f:
-    f.write(content)
-PYTHON_SCRIPT
+          import re
+          
+          with open('drivers/kernelsu/Kconfig', 'r') as f:
+              content = f.read()
+          
+          # Suche nach "config KSU" und füge "default y" hinzu
+          pattern = r'(config KSU\s+tristate[^\n]*\n)'
+          match = re.search(pattern, content)
+          if match:
+              # Prüfe ob default y schon vorhanden
+              rest = content[match.end():match.end()+200]
+              if 'default y' not in rest.split('config ')[0]:
+                  replacement = match.group(1) + '\tdefault y\n'
+                  content = content[:match.start()] + replacement + content[match.end():]
+                  print("Added default y to CONFIG_KSU")
+              else:
+                  print("CONFIG_KSU already has default y")
+          else:
+              print("config KSU not found in Kconfig")
+          
+          with open('drivers/kernelsu/Kconfig', 'w') as f:
+              f.write(content)
+          PYTHON_SCRIPT
             echo "✓ Kconfig updated"
           else
             echo "WARNING: Kconfig not found"
