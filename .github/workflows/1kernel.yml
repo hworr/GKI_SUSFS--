@@ -313,7 +313,8 @@ jobs:
           # --------------------------------------------------
           echo "Cloning SUSFS..."
           rm -rf susfs
-          git clone --depth=1 https://github.com/WildKernels/susfs4ksu.git susfs
+          git clone --depth=1 -b "${SUSFS_BRANCH}" \
+          https://github.com/WildKernels/susfs4ksu.git susfs
           echo "✓ SUSFS cloned"
 
           cd "$KERNEL_DIR"
