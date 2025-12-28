@@ -171,10 +171,36 @@ jobs:
           # Verification
           # -----------------------------------
           echo "=== SUSFS verification ==="
-          test -f fs/susfs.c && echo "✓ fs/susfs.c present"
-          test -f include/linux/susfs.h && echo "✓ susfs.h present"
-          grep -rq susfs fs && echo "✓ kernel SUSFS hooks present"
-          grep -rq susfs drivers/kernelsu && echo "✓ KernelSU SUSFS hooks present"
+          
+          if [ -f fs/susfs.c ]; then
+            echo "✓ fs/susfs.c present"
+          else
+            echo "❌ fs/susfs.c missing"
+            exit 1
+          fi
+          
+          if [ -f include/linux/susfs.h ]; then
+            echo "✓ susfs.h present"
+          else
+            echo "❌ susfs.h missing"
+            exit 1
+          fi
+          
+          if grep -rq susfs fs; then
+            echo "✓ kernel SUSFS hooks present"
+          else
+            echo "❌ kernel SUSFS hooks missing"
+            exit 1
+          fi
+          
+          # KernelSU SUSFS ist OPTIONAL (Next hat oft keine)
+          if grep -rq susfs drivers/kernelsu 2>/dev/null; then
+            echo "✓ KernelSU SUSFS hooks present"
+          else
+            echo "ℹ KernelSU SUSFS hooks not present (OK for KernelSU Next)"
+          fi
+          
+          echo "✓ SUSFS verification complete"
 
 # --------------------------------------------------
 # CONFIG (FRAGMENT ONLY – GKI SAFE)
