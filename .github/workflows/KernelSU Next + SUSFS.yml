@@ -147,42 +147,23 @@ jobs:
     # --------------------------------------------------
     # SUSFS 2.0 (KernelSU Next)
     # --------------------------------------------------
-    - name: Setup SUSFS
-      if: inputs.enable_susfs
+    - name: Apply SUSFS 2.0 patch for KernelSU Next
+      if: ${{ inputs.ksu_variant == 'kernelsu-next' && inputs.enable_susfs }}
+      working-directory: kernel
       run: |
-            cd kernel
-            
-            # Kernel Source Verzeichnis finden (gleiche Logik wie KernelSU)
-            if [ -d "common" ]; then
-              KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/common"
-            elif [ -d "private/gs-google" ]; then
-              KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/private/gs-google"
-            elif [ -d "aosp" ]; then
-              KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/aosp"
-            else
-              KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace"
-            fi
-            
-            SUSFS_BRANCH="${{ steps.vars.outputs.SUSFS_BRANCH }}"
-            
-            echo "Cloning SUSFS branch: ${SUSFS_BRANCH}..."
-            echo "Kernel directory: $KERNEL_DIR"
-            
-            # SUSFS klonen
-            git clone --depth=1 -b "${SUSFS_BRANCH}" \
-              https://github.com/WildKernels/susfs4ksu.git susfs || \
-            git clone --depth=1 -b "${SUSFS_BRANCH}" \
-              https://gitlab.com/simonpunk/susfs4ksu.git susfs
-            
-            cd "$KERNEL_DIR"
-            
-            SUSFS_SRC="$GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches"
-            KV="${{ steps.vars.outputs.KERNEL_VERSION }}"
-            
-            # 1. SUSFS Kernel-Dateien kopieren
-            echo "Copying SUSFS source files..."
-            cp "${SUSFS_SRC}/fs/susfs.c" fs/ 2>/dev/null && echo "  ✓ susfs.c" || echo "  ✗ susfs.c not found"
-            cp "${SUSFS_SRC}/include/linux/susfs.h" include/linux/ 2>/dev/null && echo "  ✓ susfs.h" || echo "  ✗ susfs.h not found"
+            set -e
+        
+            echo "Downloading SUSFS 2.0 AIO patch (Next-3.0.0)"
+            curl -fL \
+              https://raw.githubusercontent.com/WildKernels/kernel_patches/main/wild/susfs_fix_patches/v2.0.0/Next-3.0.0-susfs-2.0.0-AIO.patch \
+              -o susfs-2.0-AIO.patch
+        
+            echo "Verify patch file"
+            wc -l susfs-2.0-AIO.patch
+            head -n 20 susfs-2.0-AIO.patch
+        
+            echo "Applying SUSFS patch"
+            patch -p1 < susfs-2.0-AIO.patch
             
             # 2. Kernel patches anwenden
             echo "Applying SUSFS kernel patches for ${KV}..."
