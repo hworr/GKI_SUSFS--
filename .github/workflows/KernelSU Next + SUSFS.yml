@@ -89,34 +89,39 @@ jobs:
           -b ${BRANCH} kernel
 
     # --------------------------------------------------
-    # KERNELSU (FIXED)
+    # KERNELSU (FINAL FIX)
     # --------------------------------------------------
     - name: Apply KernelSU variant
       working-directory: kernel
       run: |
-       case "${{ inputs.ksu_variant }}" in
-       wildksu)
-        git clone https://github.com/WildPlusKernel/KernelSU.git KernelSU
-        cd KernelSU
-        bash setup.sh
-        ;;
-       sukisu)
-        git clone https://github.com/SukiSU/KernelSU.git KernelSU
-        cd KernelSU
-        bash setup.sh
-        ;;
-       kernelsu-next)
-        git clone https://github.com/KernelSU-Next/KernelSU-Next.git kernelsu-next
+        case "${{ inputs.ksu_variant }}" in
+          wildksu)
+            git clone https://github.com/WildPlusKernel/KernelSU.git KernelSU
+            cd KernelSU
+            bash setup.sh
+            ;;
+          sukisu)
+            git clone https://github.com/SukiSU/KernelSU.git KernelSU
+            cd KernelSU
+            bash setup.sh
+            ;;
+          kernelsu-next)
+            git clone https://github.com/KernelSU-Next/KernelSU-Next.git kernelsu-next
 
-        mkdir -p drivers/kernelsu
-        mkdir -p kernel/kernelsu
-        mkdir -p include/kernelsu
+            mkdir -p kernel/kernelsu
+            mkdir -p include/kernelsu
 
-        cp -r kernelsu-next/drivers/kernelsu/* drivers/kernelsu/
-        cp -r kernelsu-next/kernel/kernelsu/* kernel/kernelsu/
-        cp -r kernelsu-next/include/kernelsu/* include/kernelsu/
-        ;;
-       esac
+            cp -r kernelsu-next/kernel/kernelsu/* kernel/kernelsu/
+            cp -r kernelsu-next/include/kernelsu/* include/kernelsu/
+
+            # Kconfig + Makefile einbinden (zwingend)
+            grep -q 'source "kernel/kernelsu/Kconfig"' kernel/Kconfig || \
+              echo 'source "kernel/kernelsu/Kconfig"' >> kernel/Kconfig
+
+            grep -q 'obj-y += kernelsu/' kernel/Makefile || \
+              echo 'obj-y += kernelsu/' >> kernel/Makefile
+            ;;
+        esac
 
     # --------------------------------------------------
     # SUSFS 2.0 (KERNELSU NEXT ONLY)
