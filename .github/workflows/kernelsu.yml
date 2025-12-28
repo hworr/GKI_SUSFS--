@@ -672,71 +672,19 @@ jobs:
               echo ""
               echo "⚠ SUSFS not in Kconfig after patching - adding manually..."
               
-              # Füge SUSFS Kconfig Optionen hinzu
-              {
-                echo ""
-                echo "config KSU_SUSFS"
-                echo "	bool \"Enable SUSFS for KernelSU\""
-                echo "	depends on KSU"
-                echo "	default y"
-                echo "	help"
-                echo "	  Enable SUSFS for enhanced root hiding."
-                echo ""
-                echo "config KSU_SUSFS_HAS_MAGIC_MOUNT"
-                echo "	bool \"Enable Magic Mount support\""
-                echo "	depends on KSU_SUSFS"
-                echo "	default y"
-                echo ""
-                echo "config KSU_SUSFS_SUS_PATH"
-                echo "	bool \"Enable SUS path hiding\""
-                echo "	depends on KSU_SUSFS"
-                echo "	default y"
-                echo ""
-                echo "config KSU_SUSFS_SUS_MOUNT"
-                echo "	bool \"Enable SUS mount hiding\""
-                echo "	depends on KSU_SUSFS"
-                echo "	default y"
-                echo ""
-                echo "config KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT"
-                echo "	bool \"Auto add KSU default mounts\""
-                echo "	depends on KSU_SUSFS"
-                echo "	default y"
-                echo ""
-                echo "config KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT"
-                echo "	bool \"Auto add bind mounts\""
-                echo "	depends on KSU_SUSFS"
-                echo "	default y"
-                echo ""
-                echo "config KSU_SUSFS_SUS_KSTAT"
-                echo "	bool \"Enable SUS kstat\""
-                echo "	depends on KSU_SUSFS"
-                echo "	default y"
-                echo ""
-                echo "config KSU_SUSFS_SUS_OVERLAYFS"
-                echo "	bool \"Enable SUS overlayfs\""
-                echo "	depends on KSU_SUSFS"
-                echo "	default y"
-                echo ""
-                echo "config KSU_SUSFS_TRY_UMOUNT"
-                echo "	bool \"Enable try umount\""
-                echo "	depends on KSU_SUSFS"
-                echo "	default y"
-                echo ""
-                echo "config KSU_SUSFS_SPOOF_UNAME"
-                echo "	bool \"Enable uname spoofing\""
-                echo "	depends on KSU_SUSFS"
-                echo "	default y"
-                echo ""
-                echo "config KSU_SUSFS_ENABLE_LOG"
-                echo "	bool \"Enable SUSFS logging\""
-                echo "	depends on KSU_SUSFS"
-                echo "	default y"
-                echo ""
-                echo "config KSU_SUSFS_OPEN_REDIRECT"
-                echo "	bool \"Enable open redirect\""
-                echo "	depends on KSU_SUSFS"
-                echo "	default y"
-              } >> drivers/kernelsu/Kconfig
+              # Füge SUSFS Kconfig Optionen hinzu mit printf für korrekte Tabs
+              printf '\nconfig KSU_SUSFS\n\tbool "Enable SUSFS for KernelSU"\n\tdepends on KSU\n\tdefault y\n\thelp\n\t  Enable SUSFS for enhanced root hiding.\n' >> drivers/kernelsu/Kconfig
+              printf '\nconfig KSU_SUSFS_HAS_MAGIC_MOUNT\n\tbool "Enable Magic Mount support"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+              printf '\nconfig KSU_SUSFS_SUS_PATH\n\tbool "Enable SUS path hiding"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+              printf '\nconfig KSU_SUSFS_SUS_MOUNT\n\tbool "Enable SUS mount hiding"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+              printf '\nconfig KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT\n\tbool "Auto add KSU default mounts"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+              printf '\nconfig KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT\n\tbool "Auto add bind mounts"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+              printf '\nconfig KSU_SUSFS_SUS_KSTAT\n\tbool "Enable SUS kstat"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+              printf '\nconfig KSU_SUSFS_SUS_OVERLAYFS\n\tbool "Enable SUS overlayfs"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+              printf '\nconfig KSU_SUSFS_TRY_UMOUNT\n\tbool "Enable try umount"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+              printf '\nconfig KSU_SUSFS_SPOOF_UNAME\n\tbool "Enable uname spoofing"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+              printf '\nconfig KSU_SUSFS_ENABLE_LOG\n\tbool "Enable SUSFS logging"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+              printf '\nconfig KSU_SUSFS_OPEN_REDIRECT\n\tbool "Enable open redirect"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
               
               echo "✓ SUSFS Kconfig options added manually"
             fi
