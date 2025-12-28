@@ -115,8 +115,8 @@ jobs:
           git clone --depth=1 https://github.com/WildKernels/susfs4ksu.git susfs
 
           cd common
-          cp ../susfs/kernel_patches/fs/susfs.c fs/
-          cp ../susfs/kernel_patches/include/linux/susfs.h include/linux/
+          cp ../../../susfs/kernel_patches/fs/susfs.c fs/
+          cp ../../../susfs/kernel_patches/include/linux/susfs.h include/linux/
 
           PATCH=../susfs/kernel_patches/50_add_susfs_in_gki-${{ steps.vars.outputs.BRANCH }}.patch
           if [ -f "$PATCH" ]; then
