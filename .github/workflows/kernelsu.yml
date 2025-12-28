@@ -99,6 +99,24 @@ jobs:
           sed -i 's/#define KSU_NEXT_VERSION_STRING.*/#define KSU_NEXT_VERSION_STRING "3.0.0"/' \
             drivers/kernelsu/ksud.h || true
 
+            KSU_H="drivers/kernelsu/ksu.h"
+            
+            if [ -f "$KSU_H" ]; then
+              echo "Injecting KSU_VERSION_TAG into ksu.h..."
+            
+              # Alte Defines entfernen (falls vorhanden)
+              sed -i '/KSU_VERSION_TAG/d' "$KSU_H"
+            
+              # Runtime-sichere Definition (entscheidend!)
+              cat >> "$KSU_H" <<'EOF'
+            
+            #ifndef KSU_VERSION_TAG
+            #define KSU_VERSION_TAG "v3.0.0"
+            #endif
+            
+            EOF
+            fi
+
           grep -R "0.0.1" drivers/kernelsu && exit 1 || echo "✓ KernelSU version OK"
 
           grep -q kernelsu drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
