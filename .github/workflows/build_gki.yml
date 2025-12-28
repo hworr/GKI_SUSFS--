@@ -125,7 +125,8 @@ jobs:
               ;;
             "next")
               echo "Installing KernelSU Next..."
-              curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/main/kernel/setup.sh" | bash -s main
+              git clone https://github.com/KernelSU-Next/KernelSU-Next.git kernelsu-next
+              bash kernelsu-next/kernel/setup.sh .
               ;;
           esac
           
