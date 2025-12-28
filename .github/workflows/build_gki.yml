@@ -180,27 +180,25 @@ jobs:
             # Backup
             cp "$KBUILD_FILE" "$KBUILD_FILE.original"
             
-            # Zeige originale Kbuild für Debugging
-            echo "=== Original Kbuild (first 80 lines) ==="
-            head -80 "$KBUILD_FILE"
-            echo "========================================="
-            
-            # NEUER ANSATZ: Ersetze NUR die $(shell ...) Befehle mit festen Werten
-            # Die ifeq/else/endif Struktur bleibt intakt!
-            
-            # Ersetze KSU_GIT_VERSION shell-Befehl
-            sed -i 's/KSU_GIT_VERSION\s*:=\s*$(shell[^)]*)/KSU_GIT_VERSION := '"$KSU_COMMITS"'/' "$KBUILD_FILE"
-            
-            # Ersetze KSU_VERSION_TAG shell-Befehl  
-            sed -i 's/KSU_VERSION_TAG\s*:=\s*$(shell[^)]*)/KSU_VERSION_TAG := '"$KSU_VERSION"'/' "$KBUILD_FILE"
-            
-            # Falls es verschachtelte $() gibt, nochmal mit anderem Pattern
-            sed -i 's/$(shell cd[^)]*git[^)]*)/'"$KSU_COMMITS"'/g' "$KBUILD_FILE"
-            sed -i 's/$(shell git[^)]*)/'"$KSU_COMMITS"'/g' "$KBUILD_FILE"
+            # LÖSUNG: Füge am ANFANG der Datei die Variablen ein
+            # BEVOR die ifeq-Prüfung auf .git läuft!
+            # Das setzt KSU_GIT_VERSION_VALID := 1 was die Fallback-Logik überspringt
+            {
+              echo "# =================================================="
+              echo "# KernelSU Version - Hardcoded by GKI workflow"
+              echo "# This bypasses the .git check which fails in Bazel sandbox"
+              echo "# =================================================="
+              echo "KSU_GIT_VERSION := $KSU_COMMITS"
+              echo "KSU_GIT_TAG := $KSU_VERSION"
+              echo "KSU_GIT_VERSION_VALID := 1"
+              echo ""
+              cat "$KBUILD_FILE"
+            } > "$KBUILD_FILE.new"
+            mv "$KBUILD_FILE.new" "$KBUILD_FILE"
             
             echo ""
-            echo "=== Patched Kbuild (first 80 lines) ==="
-            head -80 "$KBUILD_FILE"
+            echo "=== Patched Kbuild (first 30 lines) ==="
+            head -30 "$KBUILD_FILE"
             echo "========================================"
           fi
           
