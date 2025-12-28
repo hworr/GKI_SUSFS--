@@ -105,11 +105,10 @@ jobs:
             cd KernelSU
             bash setup.sh
             ;;
-          kernelsu-next)
-            git clone https://github.com/KernelSU-Next/KernelSU-Next.git kernelsu-next
-            cd kernelsu-next
-            bash scripts/setup.sh ../
-            ;;
+         kernelsu-next)
+          git clone https://github.com/KernelSU-Next/KernelSU-Next.git kernelsu-next
+          bash kernelsu-next/kernel/setup.sh .
+          ;;
         esac
 
     # --------------------------------------------------
