@@ -145,7 +145,7 @@ jobs:
         esac
 
     # --------------------------------------------------
-    # SUSFS 2.0 (KernelSU Next only, AIO patch)
+    # SUSFS 2.0 (KernelSU Next, AIO patch – pinned)
     # --------------------------------------------------
     - name: Apply SUSFS 2.0
       if: ${{ inputs.ksu_variant == 'kernelsu-next' && inputs.enable_susfs }}
@@ -153,10 +153,14 @@ jobs:
       run: |
         set -e
     
+        SUSFS_PATCH_URL="https://raw.githubusercontent.com/WildKernels/susfs4ksu/6b6a4c1/kernel_patches/susfs-2.0-AIO.patch"
+    
         echo "Downloading SUSFS 2.0 AIO patch"
-        curl -L \
-          https://raw.githubusercontent.com/WildKernels/susfs4ksu/main/kernel_patches/susfs-2.0-AIO.patch \
-          -o susfs-2.0-AIO.patch
+        curl -fL "$SUSFS_PATCH_URL" -o susfs-2.0-AIO.patch
+    
+        echo "Verifying patch file"
+        wc -l susfs-2.0-AIO.patch
+        head -n 5 susfs-2.0-AIO.patch
     
         echo "Applying SUSFS 2.0 AIO patch"
         patch -p1 < susfs-2.0-AIO.patch
