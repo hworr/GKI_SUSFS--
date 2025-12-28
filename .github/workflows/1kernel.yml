@@ -225,6 +225,11 @@ jobs:
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           EOF
 
+          echo "# Disable protected exports for custom kernel" >> \
+            common/arch/arm64/configs/gki_defconfig.fragment
+          echo "CONFIG_PROTECTED_EXPORTS=n" >> \
+            common/arch/arm64/configs/gki_defconfig.fragment
+            
 # --------------------------------------------------
 # BUILD
 # --------------------------------------------------
