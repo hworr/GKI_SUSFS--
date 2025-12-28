@@ -94,24 +94,29 @@ jobs:
     - name: Apply KernelSU variant
       working-directory: kernel
       run: |
-        case "${{ inputs.ksu_variant }}" in
-          wildksu)
-            git clone https://github.com/WildPlusKernel/KernelSU.git KernelSU
-            cd KernelSU
-            bash setup.sh
-            ;;
-          sukisu)
-            git clone https://github.com/SukiSU/KernelSU.git KernelSU
-            cd KernelSU
-            bash setup.sh
-            ;;
-          kernelsu-next)
-            git clone https://github.com/KernelSU-Next/KernelSU-Next.git kernelsu-next
-            cp -r kernelsu-next/kernel/* kernel/
-            cp -r kernelsu-next/drivers/* drivers/
-            cp -r kernelsu-next/include/* include/
-            ;;
-        esac
+       case "${{ inputs.ksu_variant }}" in
+       wildksu)
+        git clone https://github.com/WildPlusKernel/KernelSU.git KernelSU
+        cd KernelSU
+        bash setup.sh
+        ;;
+       sukisu)
+        git clone https://github.com/SukiSU/KernelSU.git KernelSU
+        cd KernelSU
+        bash setup.sh
+        ;;
+       kernelsu-next)
+        git clone https://github.com/KernelSU-Next/KernelSU-Next.git kernelsu-next
+
+        mkdir -p drivers/kernelsu
+        mkdir -p kernel/kernelsu
+        mkdir -p include/kernelsu
+
+        cp -r kernelsu-next/drivers/kernelsu/* drivers/kernelsu/
+        cp -r kernelsu-next/kernel/kernelsu/* kernel/kernelsu/
+        cp -r kernelsu-next/include/kernelsu/* include/kernelsu/
+        ;;
+       esac
 
     # --------------------------------------------------
     # SUSFS 2.0 (KERNELSU NEXT ONLY)
