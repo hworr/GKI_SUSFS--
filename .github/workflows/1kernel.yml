@@ -224,11 +224,22 @@ jobs:
           CONFIG_KSU_SUSFS_ENABLE_LOG=y
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           EOF
+          
+      - name: Fix WiFi & Bluetooth (disable protected exports)
+        run: |
+          set -e
+          cd kernel_workspace/common
 
-          echo "# Disable protected exports for custom kernel" >> \
-            common/arch/arm64/configs/gki_defconfig.fragment
-          echo "CONFIG_PROTECTED_EXPORTS=n" >> \
-            common/arch/arm64/configs/gki_defconfig.fragment
+          echo "Disabling protected exports for WiFi/BT compatibility"
+
+          sed -i 's/CONFIG_PROTECTED_EXPORTS=y/# CONFIG_PROTECTED_EXPORTS is not set/' \
+            arch/arm64/configs/gki_defconfig || true
+
+          mkdir -p arch/arm64/configs
+          cat >> arch/arm64/configs/gki_defconfig.fragment << 'EOF'
+          # Fix WiFi / Bluetooth for custom kernel
+          CONFIG_PROTECTED_EXPORTS=n
+          EOF
             
 # --------------------------------------------------
 # BUILD
