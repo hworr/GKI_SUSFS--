@@ -6,7 +6,7 @@ on:
       kernelsu_variant:
         description: 'KernelSU Variante (alle SUSFS-kompatibel)'
         required: true
-        default: 'next'
+        default: 'wild'
         type: choice
         options:
           - wild       # Wild KSU - Beste SUSFS Integration
@@ -172,23 +172,42 @@ jobs:
           rm -rf drivers/kernelsu
           cp -r KernelSU/kernel drivers/kernelsu
           
-          # Version in Kbuild hardcoden
+          # Version in Kbuild hardcoden - ERSETZEN nicht hinzufügen!
           KBUILD_FILE="drivers/kernelsu/Kbuild"
           if [ -f "$KBUILD_FILE" ]; then
             echo "Patching Kbuild with version $KSU_VERSION ($KSU_COMMITS commits)..."
             
-            # Am Anfang der Datei Version definieren
-            sed -i "1i # KernelSU Version: $KSU_VERSION" "$KBUILD_FILE"
-            sed -i "2i ccflags-y += -DKSU_VERSION=$KSU_COMMITS" "$KBUILD_FILE"
+            # Backup
+            cp "$KBUILD_FILE" "$KBUILD_FILE.bak"
             
-            # Git shell-Befehle ersetzen
-            sed -i 's/$(shell cd.*git describe.*)/"'"$KSU_VERSION"'"/g' "$KBUILD_FILE"
-            sed -i 's/$(shell cd.*rev-list.*HEAD.*)/'"$KSU_COMMITS"'/g' "$KBUILD_FILE"
-            sed -i 's/$(shell.*git.*describe.*)/"'"$KSU_VERSION"'"/g' "$KBUILD_FILE"
-            sed -i 's/$(shell.*rev-list.*count.*)/'$KSU_COMMITS'/g' "$KBUILD_FILE"
+            # 1. Entferne alle shell-basierten Versionsabfragen komplett
+            # Diese Zeilen verursachen den Fallback auf v0.0.1
+            sed -i '/KSU_GIT_VERSION\s*:=\s*\$(shell/d' "$KBUILD_FILE"
+            sed -i '/KSU_VERSION_TAG\s*:=\s*\$(shell/d' "$KBUILD_FILE"
             
-            echo "Kbuild first 10 lines:"
-            head -10 "$KBUILD_FILE"
+            # 2. Entferne die Fallback-Logik (ifeq/endif Blöcke für Version)
+            sed -i '/ifeq.*KSU_GIT_VERSION/,/endif/d' "$KBUILD_FILE"
+            sed -i '/ifeq.*KSU_VERSION_TAG/,/endif/d' "$KBUILD_FILE"
+            
+            # 3. Entferne bestehende KSU_VERSION Definitionen
+            sed -i '/ccflags-y += -DKSU_VERSION=/d' "$KBUILD_FILE"
+            sed -i '/ccflags-y += -DKSU_GIT_VERSION=/d' "$KBUILD_FILE"
+            sed -i '/-DKSU_VERSION_TAG=/d' "$KBUILD_FILE"
+            
+            # 4. Entferne warning Nachrichten
+            sed -i '/KSU_GIT_VERSION not defined/d' "$KBUILD_FILE"
+            sed -i '/KSU_VERSION_TAG not defined/d' "$KBUILD_FILE"
+            
+            # 5. Füge unsere feste Version am Anfang ein (NUR EINMAL!)
+            sed -i "1i # KernelSU Version: $KSU_VERSION (patched by workflow)" "$KBUILD_FILE"
+            sed -i "2i KSU_GIT_VERSION := $KSU_COMMITS" "$KBUILD_FILE"
+            sed -i "3i KSU_VERSION_TAG := $KSU_VERSION" "$KBUILD_FILE"
+            sed -i "4i ccflags-y += -DKSU_VERSION=\$(KSU_GIT_VERSION)" "$KBUILD_FILE"
+            
+            echo ""
+            echo "=== Patched Kbuild (first 30 lines) ==="
+            head -30 "$KBUILD_FILE"
+            echo "========================================"
           fi
           
           # Makefile in drivers/Makefile hinzufügen
