@@ -282,24 +282,39 @@ jobs:
           
           KCONFIG_FILE="drivers/kernelsu/Kconfig"
           if [ -f "$KCONFIG_FILE" ]; then
-            # Prüfe ob bereits default y hat
-            if ! grep -A5 "config KSU$" "$KCONFIG_FILE" | grep -q "default y"; then
-              # Nutze awk um default y nach tristate einzufügen
-              awk '
-                /^config KSU$/ { found=1 }
-                found && /tristate/ { 
-                  print
-                  print "\tdefault y"
-                  found=0
-                  next
-                }
-                { print }
-              ' "$KCONFIG_FILE" > "$KCONFIG_FILE.tmp"
-              mv "$KCONFIG_FILE.tmp" "$KCONFIG_FILE"
-              echo "✓ Set CONFIG_KSU default to y"
+            # Zeige aktuelle CONFIG_KSU Sektion
+            echo "Current CONFIG_KSU section:"
+            sed -n '/^config KSU$/,/^config /p' "$KCONFIG_FILE" | head -15
+            echo ""
+            
+            # Prüfe ob bereits default y hat (suche in den ersten 10 Zeilen nach config KSU)
+            if sed -n '/^config KSU$/,/^config /p' "$KCONFIG_FILE" | grep -q "default y"; then
+              echo "✓ CONFIG_KSU already has default y - no changes needed"
             else
-              echo "CONFIG_KSU already has default y"
+              echo "Adding default y to CONFIG_KSU..."
+              # Nutze sed statt awk - füge default y nach der tristate Zeile ein
+              sed -i '/^config KSU$/,/^config /{
+                /tristate.*KernelSU/{
+                  a\	default y
+                }
+              }' "$KCONFIG_FILE"
+              echo "✓ Set CONFIG_KSU default to y"
             fi
+            
+            # Entferne eventuelle doppelte default y Zeilen
+            echo "Checking for duplicate default y..."
+            # Temporäre Datei erstellen ohne aufeinanderfolgende "default y" Zeilen
+            awk '
+              /^[[:space:]]*default y/ {
+                if (last_was_default) next  # Skip duplicate
+                last_was_default = 1
+                print
+                next
+              }
+              { last_was_default = 0; print }
+            ' "$KCONFIG_FILE" > "$KCONFIG_FILE.dedup"
+            mv "$KCONFIG_FILE.dedup" "$KCONFIG_FILE"
+            echo "✓ Duplicate check complete"
           else
             echo "WARNING: Kconfig not found"
           fi
@@ -676,25 +691,39 @@ jobs:
             # ============================================
             # FALLBACK: Manuelles Hinzufügen der SUSFS Kconfig
             # ============================================
-            if ! grep -q "KSU_SUSFS" drivers/kernelsu/Kconfig 2>/dev/null; then
-              echo ""
-              echo "⚠ SUSFS not in Kconfig after patching - adding manually..."
-              
-              # Füge SUSFS Kconfig Optionen hinzu mit printf für korrekte Tabs
-              printf '\nconfig KSU_SUSFS\n\tbool "Enable SUSFS for KernelSU"\n\tdepends on KSU\n\tdefault y\n\thelp\n\t  Enable SUSFS for enhanced root hiding.\n' >> drivers/kernelsu/Kconfig
-              printf '\nconfig KSU_SUSFS_HAS_MAGIC_MOUNT\n\tbool "Enable Magic Mount support"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
-              printf '\nconfig KSU_SUSFS_SUS_PATH\n\tbool "Enable SUS path hiding"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
-              printf '\nconfig KSU_SUSFS_SUS_MOUNT\n\tbool "Enable SUS mount hiding"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
-              printf '\nconfig KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT\n\tbool "Auto add KSU default mounts"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
-              printf '\nconfig KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT\n\tbool "Auto add bind mounts"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
-              printf '\nconfig KSU_SUSFS_SUS_KSTAT\n\tbool "Enable SUS kstat"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
-              printf '\nconfig KSU_SUSFS_SUS_OVERLAYFS\n\tbool "Enable SUS overlayfs"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
-              printf '\nconfig KSU_SUSFS_TRY_UMOUNT\n\tbool "Enable try umount"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
-              printf '\nconfig KSU_SUSFS_SPOOF_UNAME\n\tbool "Enable uname spoofing"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
-              printf '\nconfig KSU_SUSFS_ENABLE_LOG\n\tbool "Enable SUSFS logging"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
-              printf '\nconfig KSU_SUSFS_OPEN_REDIRECT\n\tbool "Enable open redirect"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
-              
-              echo "✓ SUSFS Kconfig options added manually"
+            echo ""
+            echo "=== Checking Kconfig after patching ==="
+            echo "Current directory: $(pwd)"
+            echo "Kconfig path: drivers/kernelsu/Kconfig"
+            
+            if [ -f "drivers/kernelsu/Kconfig" ]; then
+              echo "Kconfig exists, checking for KSU_SUSFS..."
+              if grep -q "KSU_SUSFS" drivers/kernelsu/Kconfig; then
+                echo "✓ KSU_SUSFS already in Kconfig (from patch)"
+                echo "Kconfig KSU_SUSFS entries:"
+                grep -c "config KSU_SUSFS" drivers/kernelsu/Kconfig || echo "0"
+              else
+                echo "KSU_SUSFS not found in Kconfig - adding manually..."
+                
+                # Füge SUSFS Kconfig Optionen hinzu mit printf für korrekte Tabs
+                printf '\nconfig KSU_SUSFS\n\tbool "Enable SUSFS for KernelSU"\n\tdepends on KSU\n\tdefault y\n\thelp\n\t  Enable SUSFS for enhanced root hiding.\n' >> drivers/kernelsu/Kconfig
+                printf '\nconfig KSU_SUSFS_HAS_MAGIC_MOUNT\n\tbool "Enable Magic Mount support"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+                printf '\nconfig KSU_SUSFS_SUS_PATH\n\tbool "Enable SUS path hiding"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+                printf '\nconfig KSU_SUSFS_SUS_MOUNT\n\tbool "Enable SUS mount hiding"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+                printf '\nconfig KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT\n\tbool "Auto add KSU default mounts"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+                printf '\nconfig KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT\n\tbool "Auto add bind mounts"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+                printf '\nconfig KSU_SUSFS_SUS_KSTAT\n\tbool "Enable SUS kstat"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+                printf '\nconfig KSU_SUSFS_SUS_OVERLAYFS\n\tbool "Enable SUS overlayfs"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+                printf '\nconfig KSU_SUSFS_TRY_UMOUNT\n\tbool "Enable try umount"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+                printf '\nconfig KSU_SUSFS_SPOOF_UNAME\n\tbool "Enable uname spoofing"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+                printf '\nconfig KSU_SUSFS_ENABLE_LOG\n\tbool "Enable SUSFS logging"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+                printf '\nconfig KSU_SUSFS_OPEN_REDIRECT\n\tbool "Enable open redirect"\n\tdepends on KSU_SUSFS\n\tdefault y\n' >> drivers/kernelsu/Kconfig
+                
+                echo "✓ SUSFS Kconfig options added manually"
+              fi
+            else
+              echo "ERROR: Kconfig not found at drivers/kernelsu/Kconfig"
+              ls -la drivers/kernelsu/ 2>/dev/null || echo "drivers/kernelsu/ not found"
             fi
             
             # Verifiziere dass SUSFS Kconfig hinzugefügt wurde
@@ -761,44 +790,21 @@ jobs:
           fi
           
           # ============================================
-          # 4. CONFIG_KSU_SUSFS in defconfig aktivieren
+          # 4. Verification - KEINE defconfig Änderungen!
           # ============================================
+          # WICHTIG: Wir ändern die defconfig NICHT!
+          # Bazel prüft die defconfig auf Konsistenz.
+          # Stattdessen nutzen wir "default y" in der Kconfig.
+          
           echo ""
-          echo "=== Step 4: Enabling CONFIG_KSU_SUSFS ==="
+          echo "=== Step 4: Verification ==="
           
-          # Finde die richtige defconfig
-          DEFCONFIG=""
-          for config in "arch/arm64/configs/gki_defconfig" \
-                        "arch/arm64/configs/vendor/gki_defconfig" \
-                        ".config"; do
-            if [ -f "$config" ]; then
-              DEFCONFIG="$config"
-              break
-            fi
-          done
-          
-          # Auch in der Kconfig prüfen ob SUSFS Option existiert
-          if grep -r "KSU_SUSFS" drivers/kernelsu/Kconfig 2>/dev/null; then
+          # Prüfe ob SUSFS Kconfig korrekt ist
+          if grep -q "KSU_SUSFS" drivers/kernelsu/Kconfig 2>/dev/null; then
             echo "✓ KSU_SUSFS option found in Kconfig"
-            
-            # Füge zu defconfig hinzu falls gefunden
-            if [ -n "$DEFCONFIG" ]; then
-              if ! grep -q "CONFIG_KSU_SUSFS" "$DEFCONFIG"; then
-                echo "CONFIG_KSU_SUSFS=y" >> "$DEFCONFIG"
-                echo "✓ Added CONFIG_KSU_SUSFS=y to $DEFCONFIG"
-              else
-                echo "CONFIG_KSU_SUSFS already in $DEFCONFIG"
-              fi
-            fi
+            echo "  (Using 'default y' in Kconfig - no defconfig changes needed)"
           else
             echo "⚠ KSU_SUSFS option not found in Kconfig - may need manual integration"
-          fi
-          
-          # Für Bazel builds: gki_defconfig.fragment erstellen/erweitern
-          FRAGMENT_DIR="common/build.config.gki.aarch64.fragment"
-          if [ -d "$(dirname "$FRAGMENT_DIR")" ]; then
-            echo "CONFIG_KSU=y" >> common/arch/arm64/configs/gki_defconfig.fragment 2>/dev/null || true
-            echo "CONFIG_KSU_SUSFS=y" >> common/arch/arm64/configs/gki_defconfig.fragment 2>/dev/null || true
           fi
           
           # ============================================
@@ -878,54 +884,26 @@ jobs:
           # ============================================
           # WICHTIG: Bazel prüft die defconfig auf Konsistenz
           # Wir dürfen sie NICHT direkt ändern!
-          # Stattdessen: Setze "default y" in der Kconfig
+          # Die "default y" Einträge wurden bereits in SUSFS Setup hinzugefügt.
           # ============================================
           echo ""
-          echo "=== Enabling SUSFS options in Kconfig ==="
+          echo "=== Verifying SUSFS options in Kconfig ==="
           
           KCONFIG_FILE="drivers/kernelsu/Kconfig"
           
           if [ -f "$KCONFIG_FILE" ]; then
             echo "Found KernelSU Kconfig"
             
-            # Backup
-            cp "$KCONFIG_FILE" "$KCONFIG_FILE.backup"
-            
             # Prüfe ob SUSFS Optionen vorhanden sind
             if grep -q "KSU_SUSFS" "$KCONFIG_FILE"; then
-              echo "SUSFS options found in Kconfig"
-              
-              # Einfacher Ansatz: Nutze awk um "default y" nach jeder bool/tristate Zeile einzufügen
-              # für config Blöcke die mit KSU beginnen
-              awk '
-                /^config KSU/ { in_ksu=1; print; next }
-                in_ksu && /^[[:space:]]*(bool|tristate)/ { 
-                  print
-                  # Prüfe ob nächste Zeile bereits default ist
-                  getline nextline
-                  if (nextline !~ /default/) {
-                    print "\tdefault y"
-                  }
-                  print nextline
-                  next
-                }
-                /^config [^K]/ || /^$/ { in_ksu=0 }
-                { print }
-              ' "$KCONFIG_FILE" > "$KCONFIG_FILE.new"
-              
-              mv "$KCONFIG_FILE.new" "$KCONFIG_FILE"
-              
+              echo "✓ SUSFS options found in Kconfig"
               echo ""
-              echo "=== Updated Kconfig (SUSFS section) ==="
-              grep -B1 -A3 "config KSU" "$KCONFIG_FILE" | head -50
-              echo "========================================"
+              echo "=== Kconfig SUSFS section ==="
+              grep -A3 "config KSU_SUSFS" "$KCONFIG_FILE" | head -20
+              echo "=============================="
             else
               echo "WARNING: No SUSFS options in Kconfig!"
               echo "The SUSFS KSU patch may not have been applied correctly."
-              echo ""
-              echo "=== Full Kconfig content ==="
-              cat "$KCONFIG_FILE"
-              echo "============================"
             fi
           else
             echo "WARNING: KernelSU Kconfig not found at $KCONFIG_FILE"
@@ -933,6 +911,100 @@ jobs:
           
           echo ""
           echo "=== Additional patches complete ==="
+
+      # ============================================
+      # KRITISCH: Entferne KSU Optionen aus defconfig
+      # Bazel prüft defconfig Konsistenz - wir nutzen Kconfig default y
+      # ============================================
+      - name: Clean defconfig for Bazel
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          
+          # Kernel Source Verzeichnis finden
+          if [ -d "common" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/common"
+          elif [ -d "private/gs-google" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/private/gs-google"
+          elif [ -d "aosp" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/aosp"
+          else
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace"
+          fi
+          
+          cd "$KERNEL_DIR"
+          
+          echo "============================================"
+          echo "Cleaning defconfig for Bazel compatibility"
+          echo "============================================"
+          echo ""
+          echo "Bazel validates defconfig against savedefconfig."
+          echo "Options with 'default y' in Kconfig should NOT be in defconfig."
+          echo ""
+          
+          # Finde alle defconfig Dateien
+          for defconfig in arch/arm64/configs/gki_defconfig \
+                          arch/arm64/configs/vendor/gki_defconfig; do
+            if [ -f "$defconfig" ]; then
+              echo "Checking $defconfig..."
+              
+              # Zeige KSU Einträge vor cleanup
+              if grep -q "CONFIG_KSU" "$defconfig"; then
+                echo "  Found CONFIG_KSU entries:"
+                grep "CONFIG_KSU" "$defconfig" | sed 's/^/    /'
+                
+                # Entferne alle CONFIG_KSU* Zeilen
+                sed -i '/^CONFIG_KSU/d' "$defconfig"
+                echo "  ✓ Removed CONFIG_KSU* entries from $defconfig"
+              else
+                echo "  No CONFIG_KSU entries found"
+              fi
+            fi
+          done
+          
+          # Entferne auch aus .config falls vorhanden
+          if [ -f ".config" ]; then
+            if grep -q "CONFIG_KSU" ".config"; then
+              sed -i '/^CONFIG_KSU/d' ".config"
+              echo "✓ Removed CONFIG_KSU* from .config"
+            fi
+          fi
+          
+          echo ""
+          echo "✓ defconfig cleanup complete"
+          
+          # ============================================
+          # Entferne doppelte "default y" aus Kconfig
+          # ============================================
+          echo ""
+          echo "=== Removing duplicate 'default y' from Kconfig ==="
+          
+          KCONFIG_FILE="drivers/kernelsu/Kconfig"
+          if [ -f "$KCONFIG_FILE" ]; then
+            # Zeige vorher
+            echo "Before dedup (default y count):"
+            grep -c "default y" "$KCONFIG_FILE" || echo "0"
+            
+            # Entferne aufeinanderfolgende "default y" Zeilen
+            awk '
+              /^[[:space:]]*default y[[:space:]]*$/ {
+                if (last_was_default) next  # Skip duplicate
+                last_was_default = 1
+                print
+                next
+              }
+              { last_was_default = 0; print }
+            ' "$KCONFIG_FILE" > "$KCONFIG_FILE.dedup"
+            mv "$KCONFIG_FILE.dedup" "$KCONFIG_FILE"
+            
+            # Zeige nachher
+            echo "After dedup (default y count):"
+            grep -c "default y" "$KCONFIG_FILE" || echo "0"
+            
+            echo ""
+            echo "=== Final Kconfig (first 60 lines) ==="
+            head -60 "$KCONFIG_FILE"
+            echo "======================================="
+          fi
 
       # ============================================
       # WICHTIG: Version Patch NACH allen anderen Patches!
