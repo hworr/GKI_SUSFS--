@@ -1,0 +1,191 @@
+name: Kernel Build (WildKSU / SukiSU / KernelSU Next + SUSFS)
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      android_version:
+        type: choice
+        options: ["14", "15", "16"]
+        default: "15"
+      kernel_version:
+        type: choice
+        options: ["5.15", "6.1", "6.6"]
+        default: "6.6"
+      os_patch_level:
+        type: string
+        default: "2025-09"
+      ksu_variant:
+        type: choice
+        options: [wildksu, sukisu, kernelsu-next]
+        default: kernelsu-next
+      enable_susfs:
+        description: "Enable SUSFS 2.0 (KernelSU Next only)"
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    env:
+      CCACHE_DIR: /home/runner/.ccache
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+      CCACHE_CPP2: "yes"
+
+    steps:
+    # --------------------------------------------------
+    # SPACE
+    # --------------------------------------------------
+    - name: Free disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
+        df -h
+
+    # --------------------------------------------------
+    # DEPS
+    # --------------------------------------------------
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          git bc bison flex libssl-dev \
+          build-essential zip curl ccache \
+          python3 python3-pip
+
+    # --------------------------------------------------
+    # INSTALL REPO TOOL
+    # --------------------------------------------------
+    - name: Install repo tool
+      run: |
+        sudo curl -o /usr/local/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
+        sudo chmod +x /usr/local/bin/repo
+        repo --version
+
+    # --------------------------------------------------
+    # VARS
+    # --------------------------------------------------
+    - name: Set variables
+      run: |
+        BRANCH="android${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
+        echo "BRANCH=$BRANCH" >> $GITHUB_ENV
+        echo "Using kernel branch: $BRANCH"
+
+    # --------------------------------------------------
+    # KERNEL SOURCE (FAST: repo sync)
+    # --------------------------------------------------
+    - name: Download kernel source (repo sync)
+      run: |
+        set -e
+        MANIFEST_URL="https://android.googlesource.com/kernel/manifest"
+
+        mkdir -p kernel_workspace
+        cd kernel_workspace
+
+        repo init -u $MANIFEST_URL -b common-${BRANCH} --depth=1
+        repo sync -c -j$(nproc) --no-tags --no-clone-bundle
+
+        # common -> kernel (so rest of workflow stays simple)
+        mv common ../kernel
+
+    # --------------------------------------------------
+    # KERNELSU
+    # --------------------------------------------------
+    - name: Apply KernelSU variant
+      run: |
+        set -e
+        cd kernel
+
+        case "${{ inputs.ksu_variant }}" in
+          wildksu)
+            git clone https://github.com/WildPlusKernel/KernelSU.git KernelSU
+            cd KernelSU
+            bash setup.sh
+            ;;
+          sukisu)
+            git clone https://github.com/SukiSU/KernelSU.git KernelSU
+            cd KernelSU
+            bash setup.sh
+            ;;
+          kernelsu-next)
+            git clone https://github.com/KernelSU-Next/KernelSU-Next.git kernelsu-next
+
+            if [ "${{ inputs.enable_susfs }}" = "true" ]; then
+              echo "Patching KernelSU Next with SUSFS 2.0 AIO"
+              cd kernelsu-next
+              curl -fL \
+                https://raw.githubusercontent.com/WildKernels/kernel_patches/main/wild/susfs_fix_patches/v2.0.0/Next-3.0.0-susfs-2.0.0-AIO.patch \
+                -o susfs.patch
+              patch -p1 < susfs.patch
+              cd ..
+            fi
+
+            # integrate KSU Next into kernel tree
+            bash kernelsu-next/kernel/setup.sh .
+            ;;
+        esac
+
+    # --------------------------------------------------
+    # DEFCONFIG
+    # --------------------------------------------------
+    - name: Configure kernel
+      run: |
+        set -e
+        cd kernel
+        DEFCONFIG=common/arch/arm64/configs/gki_defconfig
+
+        echo "CONFIG_KSU=y" >> $DEFCONFIG
+        echo "CONFIG_KSU_LSM_SECURITY_HOOKS=y" >> $DEFCONFIG
+
+        if [ "${{ inputs.enable_susfs }}" = "true" ]; then
+          echo "CONFIG_KSU_SUSFS=y" >> $DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> $DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> $DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> $DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> $DEFCONFIG
+        fi
+
+    # --------------------------------------------------
+    # BUILD
+    # --------------------------------------------------
+    - name: Build kernel (Bazel GKI)
+      run: |
+        set -e
+        cd kernel
+        tools/bazel build \
+          --config=fast \
+          --lto=thin \
+          //common:kernel_aarch64_dist
+
+    # --------------------------------------------------
+    # BOOT.IMG
+    # --------------------------------------------------
+    - name: Build boot.img
+      run: |
+        set -e
+        cd kernel
+        mkdir -p out
+        cp bazel-bin/common/kernel_aarch64/Image out/Image
+
+        python3 build/build-tools/mkbootimg.py \
+          --kernel out/Image \
+          --header_version 4 \
+          --pagesize 4096 \
+          --os_version ${{ inputs.android_version }}.0.0 \
+          --os_patch_level ${{ inputs.os_patch_level }} \
+          -o out/boot.img
+
+    # --------------------------------------------------
+    # UPLOAD
+    # --------------------------------------------------
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: boot-${{ inputs.ksu_variant }}
+        path: kernel/out/boot.img
