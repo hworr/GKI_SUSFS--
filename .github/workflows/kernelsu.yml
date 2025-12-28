@@ -1,0 +1,152 @@
+name: kernelsu + SUSFS
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernelsu_variant:
+        description: 'KernelSU Variante'
+        required: true
+        default: 'next'
+        type: choice
+        options: [wild, sukisu, next]
+      gki_branch:
+        description: 'GKI Branch'
+        required: true
+        default: 'android15-6.6'
+        type: choice
+        options:
+          - android15-6.6
+          - android14-6.1
+          - android14-5.15
+          - android13-5.15
+          - android13-5.10
+          - android12-5.10
+      enable_susfs:
+        description: 'SUSFS aktivieren'
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+# --------------------------------------------------
+# ENV
+# --------------------------------------------------
+      - name: Maximize Build Space
+        uses: easimon/maximize-build-space@master
+
+      - name: Setup Build Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git ccache build-essential repo bc flex bison \
+            libssl-dev libelf-dev pahole python3 python-is-python3 zip unzip curl
+
+      - name: Set Variables
+        id: vars
+        run: |
+          echo "BRANCH=${{ inputs.gki_branch }}" >> $GITHUB_OUTPUT
+          echo "KERNEL_VERSION=$(echo '${{ inputs.gki_branch }}' | cut -d'-' -f2)" >> $GITHUB_OUTPUT
+
+# --------------------------------------------------
+# KERNEL SOURCE
+# --------------------------------------------------
+      - name: Download Kernel Source
+        run: |
+          mkdir kernel_workspace && cd kernel_workspace
+          repo init -u https://android.googlesource.com/kernel/manifest \
+            -b common-${{ steps.vars.outputs.BRANCH }} --depth=1
+          repo sync -c -j$(nproc) --no-tags --no-clone-bundle
+
+# --------------------------------------------------
+# KERNELSU (MANUAL, FIXED)
+# --------------------------------------------------
+      - name: Setup KernelSU (manual, fixed)
+        run: |
+          set -e
+          cd kernel_workspace/common
+
+          VARIANT="${{ inputs.kernelsu_variant }}"
+
+          if [ ! -d KernelSU ]; then
+            case "$VARIANT" in
+              wild)   git clone https://github.com/WildKernels/Wild_KSU.git KernelSU ;;
+              sukisu) git clone https://github.com/ShirkNeko/SuKiSu.git KernelSU ;;
+              next)   git clone --recurse-submodules https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU ;;
+            esac
+          fi
+
+          rm -rf drivers/kernelsu
+          cp -r KernelSU/kernel drivers/kernelsu
+
+          KBUILD=drivers/kernelsu/Kbuild
+          sed -i '/0.0.1/d;/KSU_VERSION_TAG_FALLBACK/d;/KSU_NEXT_VERSION_/d' "$KBUILD"
+
+          cat >> "$KBUILD" <<EOF
+
+          # KernelSU Next manual version
+          ccflags-y += -DKSU_NEXT_VERSION_MAJOR=3
+          ccflags-y += -DKSU_NEXT_VERSION_MINOR=0
+          ccflags-y += -DKSU_NEXT_VERSION_PATCH=0
+          ccflags-y += -DKSU_NEXT_VERSION_STRING=\"3.0.0\"
+          ccflags-y += -DKSU_VERSION_TAG=\"v3.0.0\"
+          EOF
+
+          sed -i 's/#define KSU_NEXT_VERSION_STRING.*/#define KSU_NEXT_VERSION_STRING "3.0.0"/' \
+            drivers/kernelsu/ksud.h || true
+
+          grep -R "0.0.1" drivers/kernelsu && exit 1 || echo "✓ KernelSU version OK"
+
+          grep -q kernelsu drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+          grep -q kernelsu/Kconfig drivers/Kconfig || \
+            sed -i '/^endmenu$/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+
+# --------------------------------------------------
+# SUSFS (FIXED PATCH APPLY)
+# --------------------------------------------------
+      - name: Setup SUSFS
+        if: inputs.enable_susfs
+        run: |
+          cd kernel_workspace
+          git clone --depth=1 https://github.com/WildKernels/susfs4ksu.git susfs
+
+          cd common
+          cp ../susfs/kernel_patches/fs/susfs.c fs/
+          cp ../susfs/kernel_patches/include/linux/susfs.h include/linux/
+
+          PATCH=../susfs/kernel_patches/50_add_susfs_in_gki-${{ steps.vars.outputs.BRANCH }}.patch
+          if [ -f "$PATCH" ]; then
+            git apply --check "$PATCH" && git apply "$PATCH" || patch -p1 < "$PATCH"
+          fi
+
+          KSU_PATCH=../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+          if [ -f "$KSU_PATCH" ]; then
+            cd drivers/kernelsu
+            git apply --check "$KSU_PATCH" && git apply "$KSU_PATCH" || patch -p1 < "$KSU_PATCH"
+          fi
+
+# --------------------------------------------------
+# BUILD
+# --------------------------------------------------
+      - name: Build Kernel
+        run: |
+          cd kernel_workspace
+          tools/bazel run //common:kernel_aarch64_dist -- --dist_dir=dist
+
+# --------------------------------------------------
+# OUTPUT
+# --------------------------------------------------
+      - name: Package Kernel
+        run: |
+          mkdir output
+          find kernel_workspace -name Image -exec cp {} output/ \;
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ inputs.kernelsu_variant }}
+          path: output/*
