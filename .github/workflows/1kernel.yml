@@ -156,7 +156,7 @@ jobs:
           # -----------------------------------
           # Step 3: KernelSU Integration
           # -----------------------------------
-          KSU_PATCH="$SUSFS_SRC/KernelSU/10_enable_susfs_for_ksu.patch"
+          KSU_PATCH="$SUSFS_SRC/KernelSU/enable_susfs_for_ksu.patch"
       
           if [ -f "$KSU_PATCH" ]; then
             echo "Applying KernelSU SUSFS patch..."
