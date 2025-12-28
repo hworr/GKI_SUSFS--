@@ -81,6 +81,15 @@ jobs:
         echo "Using kernel branch: $BRANCH"
 
     # --------------------------------------------------
+    # INSTALL REPO TOOL (REQUIRED)
+    # --------------------------------------------------
+    - name: Install repo tool
+      run: |
+          sudo curl -o /usr/local/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
+          sudo chmod +x /usr/local/bin/repo
+          repo --version
+
+    # --------------------------------------------------
     # KERNEL SOURCE (FAST: repo sync)
     # --------------------------------------------------
     - name: Download kernel source (repo sync)
