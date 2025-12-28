@@ -115,15 +115,15 @@ jobs:
           git clone --depth=1 https://github.com/WildKernels/susfs4ksu.git susfs
 
           cd common
-          cp ../../../susfs/kernel_patches/fs/susfs.c fs/
-          cp ../../../susfs/kernel_patches/include/linux/susfs.h include/linux/
+          cp ../susfs/kernel_patches/fs/susfs.c fs/
+          cp ../susfs/kernel_patches/include/linux/susfs.h include/linux/
 
-          PATCH=../susfs/kernel_patches/50_add_susfs_in_gki-${{ steps.vars.outputs.BRANCH }}.patch
+          PATCH=../../../susfs/kernel_patches/50_add_susfs_in_gki-${{ steps.vars.outputs.BRANCH }}.patch
           if [ -f "$PATCH" ]; then
             git apply --check "$PATCH" && git apply "$PATCH" || patch -p1 < "$PATCH"
           fi
 
-          KSU_PATCH=../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+          KSU_PATCH=../../../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
           if [ -f "$KSU_PATCH" ]; then
             cd drivers/kernelsu
             git apply --check "$KSU_PATCH" && git apply "$KSU_PATCH" || patch -p1 < "$KSU_PATCH"
