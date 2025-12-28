@@ -6,7 +6,7 @@ on:
       kernelsu_variant:
         description: 'KernelSU Variante (alle SUSFS-kompatibel)'
         required: true
-        default: 'wild'
+        default: 'next'
         type: choice
         options:
           - wild       # Wild KSU - Beste SUSFS Integration
@@ -105,7 +105,30 @@ jobs:
 
       - name: Setup KernelSU
         run: |
-          cd $GITHUB_WORKSPACE/kernel_workspace/common
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          
+          # Kernel Source Verzeichnis finden
+          if [ -d "common" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/common"
+          elif [ -d "private/gs-google" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/private/gs-google"
+          elif [ -d "aosp" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/aosp"
+          else
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace"
+          fi
+          
+          echo "Kernel directory: $KERNEL_DIR"
+          
+          # Prüfen ob drivers/ existiert
+          if [ ! -d "$KERNEL_DIR/drivers" ]; then
+            echo "ERROR: drivers/ not found in $KERNEL_DIR"
+            echo "Contents:"
+            ls -la "$KERNEL_DIR"
+            exit 1
+          fi
+          
+          cd "$KERNEL_DIR"
           
           VARIANT="${{ inputs.kernelsu_variant }}"
           
@@ -127,7 +150,7 @@ jobs:
               ;;
           esac
           
-          # Version aus Git holen BEVOR wir was ändern
+          # Version aus Git holen
           cd KernelSU
           git fetch --tags
           KSU_VERSION=$(git describe --abbrev=0 --tags 2>/dev/null || echo "v1.0.0")
@@ -140,68 +163,48 @@ jobs:
           cd ..
           
           # ============================================
-          # WICHTIG: Version manuell in Kbuild setzen
-          # Bazel Sandbox hat kein .git, also hardcoden!
+          # Manuelle Integration (ohne setup.sh)
           # ============================================
           
-          KBUILD_FILE="KernelSU/kernel/Kbuild"
+          echo "Integrating KernelSU into kernel..."
           
+          # Kopiere KernelSU kernel module
+          rm -rf drivers/kernelsu
+          cp -r KernelSU/kernel drivers/kernelsu
+          
+          # Version in Kbuild hardcoden
+          KBUILD_FILE="drivers/kernelsu/Kbuild"
           if [ -f "$KBUILD_FILE" ]; then
-            echo "Patching Kbuild with version info..."
+            echo "Patching Kbuild with version $KSU_VERSION ($KSU_COMMITS commits)..."
             
-            # Ersetze die git-basierten Versionsabfragen durch feste Werte
-            sed -i "s/KSU_GIT_VERSION := \$(shell .*/KSU_GIT_VERSION := $KSU_COMMITS/" "$KBUILD_FILE" || true
-            sed -i "s/ccflags-y += -DKSU_GIT_VERSION=.*/ccflags-y += -DKSU_GIT_VERSION=$KSU_COMMITS/" "$KBUILD_FILE" || true
+            # Am Anfang der Datei Version definieren
+            sed -i "1i # KernelSU Version: $KSU_VERSION" "$KBUILD_FILE"
+            sed -i "2i ccflags-y += -DKSU_VERSION=$KSU_COMMITS" "$KBUILD_FILE"
             
-            # Falls die Version über shell ermittelt wird, ersetzen
-            sed -i "s/\$(shell cd.*git describe.*/\"$KSU_VERSION\"/" "$KBUILD_FILE" || true
-            sed -i "s/\$(shell cd.*rev-list.*count.*HEAD.*)/$KSU_COMMITS/" "$KBUILD_FILE" || true
+            # Git shell-Befehle ersetzen
+            sed -i 's/$(shell cd.*git describe.*)/"'"$KSU_VERSION"'"/g' "$KBUILD_FILE"
+            sed -i 's/$(shell cd.*rev-list.*HEAD.*)/'"$KSU_COMMITS"'/g' "$KBUILD_FILE"
+            sed -i 's/$(shell.*git.*describe.*)/"'"$KSU_VERSION"'"/g' "$KBUILD_FILE"
+            sed -i 's/$(shell.*rev-list.*count.*)/'$KSU_COMMITS'/g' "$KBUILD_FILE"
             
-            # Direkt CFLAGS hinzufügen am Anfang der Datei
-            sed -i "1i ccflags-y += -DKSU_VERSION=$KSU_COMMITS" "$KBUILD_FILE"
-            
-            echo "Kbuild patched!"
-            head -20 "$KBUILD_FILE"
+            echo "Kbuild first 10 lines:"
+            head -10 "$KBUILD_FILE"
           fi
           
-          # Auch Makefile prüfen
-          MAKEFILE="KernelSU/kernel/Makefile"
-          if [ -f "$MAKEFILE" ]; then
-            sed -i "s/\$(shell.*git.*describe.*/\"$KSU_VERSION\"/" "$MAKEFILE" || true
-            sed -i "s/\$(shell.*rev-list.*count.*)/$KSU_COMMITS/" "$MAKEFILE" || true
+          # Makefile in drivers/Makefile hinzufügen
+          if ! grep -q "kernelsu" drivers/Makefile; then
+            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+            echo "Added kernelsu to drivers/Makefile"
           fi
           
-          # setup.sh für KernelSU Integration
-          cd KernelSU
-          if [ -f "kernel/setup.sh" ]; then
-            bash kernel/setup.sh ..
-          fi
-          cd ..
-          
-          # Falls setup.sh nicht funktioniert hat, manuell integrieren
-          if [ ! -d "drivers/kernelsu" ]; then
-            echo "Manual KernelSU integration..."
-            
-            # Kopiere statt Symlink (für Bazel)
-            cp -r KernelSU/kernel drivers/kernelsu
-            
-            # Makefile
-            if ! grep -q "CONFIG_KSU" drivers/Makefile 2>/dev/null; then
-              echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
-            fi
-            
-            # Kconfig
-            if ! grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig 2>/dev/null; then
-              sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-            fi
+          # Kconfig in drivers/Kconfig hinzufügen
+          if ! grep -q "kernelsu/Kconfig" drivers/Kconfig; then
+            sed -i '/^endmenu$/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+            echo "Added kernelsu to drivers/Kconfig"
           fi
           
-          # Version nochmal in der kopierten Version setzen
-          if [ -f "drivers/kernelsu/Kbuild" ]; then
-            sed -i "1i ccflags-y += -DKSU_VERSION=$KSU_COMMITS" "drivers/kernelsu/Kbuild"
-            sed -i "s/\$(shell.*git.*describe.*/\"$KSU_VERSION\"/" "drivers/kernelsu/Kbuild" || true
-            sed -i "s/\$(shell.*rev-list.*count.*)/$KSU_COMMITS/" "drivers/kernelsu/Kbuild" || true
-          fi
+          # KSU_EXPECTED_SIZE und KSU_EXPECTED_HASH für den Manager
+          # (optional, aber gut für Kompatibilität)
           
           # Verify
           echo ""
@@ -210,38 +213,56 @@ jobs:
           echo "  Variant: $VARIANT"
           echo "  Version: $KSU_VERSION"
           echo "  Commits: $KSU_COMMITS"
-          echo "  drivers/kernelsu exists: $([ -d drivers/kernelsu ] && echo 'YES' || echo 'NO')"
+          echo "  Kernel Dir: $KERNEL_DIR"
+          echo "  drivers/kernelsu: $([ -d drivers/kernelsu ] && echo 'EXISTS' || echo 'MISSING')"
           echo "============================================"
           
+          # Check
           if [ ! -d "drivers/kernelsu" ]; then
             echo "ERROR: KernelSU integration failed!"
             exit 1
           fi
+          
+          grep -q "kernelsu" drivers/Makefile || { echo "ERROR: Makefile not patched"; exit 1; }
+          
+          echo "✓ KernelSU setup complete"
 
       - name: Setup SUSFS
         if: inputs.enable_susfs
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           
+          # Kernel Source Verzeichnis finden (gleiche Logik wie KernelSU)
+          if [ -d "common" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/common"
+          elif [ -d "private/gs-google" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/private/gs-google"
+          elif [ -d "aosp" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/aosp"
+          else
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace"
+          fi
+          
           SUSFS_BRANCH="${{ steps.vars.outputs.SUSFS_BRANCH }}"
           
           echo "Cloning SUSFS branch: ${SUSFS_BRANCH}..."
+          echo "Kernel directory: $KERNEL_DIR"
           
-          # SUSFS von WildKernels (deren Fork ist aktueller)
+          # SUSFS klonen
           git clone --depth=1 -b "${SUSFS_BRANCH}" \
             https://github.com/WildKernels/susfs4ksu.git susfs || \
           git clone --depth=1 -b "${SUSFS_BRANCH}" \
             https://gitlab.com/simonpunk/susfs4ksu.git susfs
           
-          cd common
+          cd "$KERNEL_DIR"
           
-          SUSFS_SRC="../susfs/kernel_patches"
+          SUSFS_SRC="$GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches"
           KV="${{ steps.vars.outputs.KERNEL_VERSION }}"
           
           # 1. SUSFS Kernel-Dateien kopieren
           echo "Copying SUSFS source files..."
-          cp "${SUSFS_SRC}/fs/susfs.c" fs/ 2>/dev/null || true
-          cp "${SUSFS_SRC}/include/linux/susfs.h" include/linux/ 2>/dev/null || true
+          cp "${SUSFS_SRC}/fs/susfs.c" fs/ 2>/dev/null && echo "  ✓ susfs.c" || echo "  ✗ susfs.c not found"
+          cp "${SUSFS_SRC}/include/linux/susfs.h" include/linux/ 2>/dev/null && echo "  ✓ susfs.h" || echo "  ✗ susfs.h not found"
           
           # 2. Kernel patches anwenden
           echo "Applying SUSFS kernel patches for ${KV}..."
@@ -254,13 +275,13 @@ jobs:
                 echo "Applying: $(basename $patch)"
                 git apply --check "$patch" 2>/dev/null && git apply "$patch" || \
                 patch -p1 --forward < "$patch" || \
-                echo "Patch may already be applied: $(basename $patch)"
+                echo "  (may already be applied)"
               fi
             done
           else
             echo "WARNING: No patches found in: $PATCH_DIR"
             echo "Available directories:"
-            ls -la "${SUSFS_SRC}/" || true
+            ls -la "${SUSFS_SRC}/" 2>/dev/null || true
           fi
           
           # 3. KernelSU SUSFS Integration Patch
@@ -268,13 +289,13 @@ jobs:
           
           KSU_PATCH="${SUSFS_SRC}/KernelSU/10_enable_susfs_for_ksu.patch"
           
-          if [ -f "$KSU_PATCH" ] && [ -d "KernelSU" ]; then
-            cd KernelSU
+          if [ -f "$KSU_PATCH" ] && [ -d "drivers/kernelsu" ]; then
+            cd drivers/kernelsu
             echo "Patching KernelSU for SUSFS support..."
             git apply --check "$KSU_PATCH" 2>/dev/null && git apply "$KSU_PATCH" || \
             patch -p1 --forward < "$KSU_PATCH" || \
-            echo "KSU SUSFS patch may already be applied"
-            cd ..
+            echo "  (may already be applied)"
+            cd ../..
           fi
           
           echo "✓ SUSFS setup complete"
@@ -282,14 +303,28 @@ jobs:
       - name: Apply Additional Patches
         if: inputs.enable_susfs
         run: |
-          cd $GITHUB_WORKSPACE/kernel_workspace/common
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          
+          # Kernel Source Verzeichnis finden
+          if [ -d "common" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/common"
+          elif [ -d "private/gs-google" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/private/gs-google"
+          elif [ -d "aosp" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/aosp"
+          else
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace"
+          fi
+          
+          cd "$KERNEL_DIR"
           
           # Verstecke KernelSU Symbole (Anti-Detection)
           echo "Applying anti-detection patches..."
           
-          # Symbol hiding wenn vorhanden
-          if [ -f "../susfs/kernel_patches/hide_stuff.patch" ]; then
-            git apply "../susfs/kernel_patches/hide_stuff.patch" || true
+          SUSFS_SRC="$GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches"
+          
+          if [ -f "$SUSFS_SRC/hide_stuff.patch" ]; then
+            git apply "$SUSFS_SRC/hide_stuff.patch" || echo "hide_stuff.patch may already be applied"
           fi
 
       - name: Build Kernel
