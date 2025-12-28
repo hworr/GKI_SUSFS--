@@ -97,17 +97,21 @@ jobs:
         case "${{ inputs.ksu_variant }}" in
           wildksu)
             git clone https://github.com/WildPlusKernel/KernelSU.git KernelSU
+            cd KernelSU
+            bash setup.sh
             ;;
           sukisu)
             git clone https://github.com/SukiSU/KernelSU.git KernelSU
+            cd KernelSU
+            bash setup.sh
             ;;
           kernelsu-next)
-            git clone https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
+            git clone https://github.com/KernelSU-Next/KernelSU-Next.git kernelsu-next
+            cp -r kernelsu-next/kernel/* kernel/
+            cp -r kernelsu-next/drivers/* drivers/
+            cp -r kernelsu-next/include/* include/
             ;;
         esac
-
-        cd KernelSU
-        bash setup.sh
 
     # --------------------------------------------------
     # SUSFS (KSU NEXT ONLY)
