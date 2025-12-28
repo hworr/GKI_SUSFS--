@@ -8,20 +8,24 @@ on:
   workflow_dispatch:
     inputs:
       android_version:
+        description: "Android Version"
         type: choice
         options: ["14", "15", "16"]
         default: "15"
 
       kernel_version:
+        description: "Kernel Version"
         type: choice
         options: ["5.15", "6.1", "6.6"]
         default: "6.6"
 
       os_patch_level:
+        description: "OS Patch Level (YYYY-MM)"
         type: string
         default: "2025-09"
 
       ksu_variant:
+        description: "KernelSU Variant"
         type: choice
         options:
           - wildksu
@@ -39,32 +43,55 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
+    env:
+      CCACHE_DIR: /home/runner/.ccache
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+      CCACHE_CPP2: "yes"
+
     steps:
+    # --------------------------------------------------
+    # SPACE
+    # --------------------------------------------------
     - name: Free disk space
       run: |
         sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
+        df -h
 
-    - name: Install deps
+    # --------------------------------------------------
+    # DEPS
+    # --------------------------------------------------
+    - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install -y git bc bison flex libssl-dev \
-          build-essential zip curl python3 ccache
+        sudo apt install -y \
+          git bc bison flex libssl-dev \
+          build-essential zip curl ccache \
+          python3 python3-pip
 
+    # --------------------------------------------------
+    # VARS
+    # --------------------------------------------------
     - name: Set variables
       run: |
         BRANCH="android${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
         echo "BRANCH=$BRANCH" >> $GITHUB_ENV
         echo "KERNEL_ROOT=$GITHUB_WORKSPACE/kernel" >> $GITHUB_ENV
+        echo "Using branch: $BRANCH"
 
+    # --------------------------------------------------
+    # KERNEL SOURCE (FIXED)
+    # --------------------------------------------------
     - name: Clone GKI kernel
       run: |
         git clone https://android.googlesource.com/kernel/common \
-          -b common-${BRANCH} kernel
+          -b ${BRANCH} kernel
 
     # --------------------------------------------------
     # KERNELSU
     # --------------------------------------------------
-    - name: Apply KernelSU
+    - name: Apply KernelSU variant
       working-directory: kernel
       run: |
         case "${{ inputs.ksu_variant }}" in
@@ -83,7 +110,7 @@ jobs:
         bash setup.sh
 
     # --------------------------------------------------
-    # SUSFS FOR KSU NEXT
+    # SUSFS (KSU NEXT ONLY)
     # --------------------------------------------------
     - name: Apply SUSFS 2.0 (KernelSU Next)
       if: ${{ inputs.ksu_variant == 'kernelsu-next' && inputs.enable_susfs }}
@@ -115,14 +142,16 @@ jobs:
     # --------------------------------------------------
     # BUILD
     # --------------------------------------------------
-    - name: Build kernel
+    - name: Build kernel (Bazel)
       working-directory: kernel
       run: |
-        tools/bazel build --config=fast --lto=thin \
+        tools/bazel build \
+          --config=fast \
+          --lto=thin \
           //common:kernel_aarch64_dist
 
     # --------------------------------------------------
-    # BOOT IMG
+    # BOOT.IMG
     # --------------------------------------------------
     - name: Build boot.img
       working-directory: kernel
@@ -138,7 +167,10 @@ jobs:
           --os_patch_level ${{ inputs.os_patch_level }} \
           -o out/boot.img
 
-    - name: Upload
+    # --------------------------------------------------
+    # UPLOAD
+    # --------------------------------------------------
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: boot-${{ inputs.ksu_variant }}
