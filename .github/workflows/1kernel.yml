@@ -74,7 +74,7 @@ jobs:
 
           case "$VARIANT" in
             wild)   git clone https://github.com/WildKernels/Wild_KSU.git KernelSU ;;
-            sukisu) git clone https://github.com/ShirkNeko/SuKiSu.git KernelSU ;;
+            sukisu) git clone https://x-access-token:${GITHUB_TOKEN}@github.com/ShirkNeko/SuKiSu.git KernelSUU ;;
             next)   git clone --recurse-submodules https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU ;;
           esac
 
