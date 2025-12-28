@@ -107,19 +107,8 @@ jobs:
             ;;
           kernelsu-next)
             git clone https://github.com/KernelSU-Next/KernelSU-Next.git kernelsu-next
-
-            mkdir -p kernel/kernelsu
-            mkdir -p include/kernelsu
-
-            cp -r kernelsu-next/kernel/kernelsu/* kernel/kernelsu/
-            cp -r kernelsu-next/include/kernelsu/* include/kernelsu/
-
-            # Kconfig + Makefile einbinden (zwingend)
-            grep -q 'source "kernel/kernelsu/Kconfig"' kernel/Kconfig || \
-              echo 'source "kernel/kernelsu/Kconfig"' >> kernel/Kconfig
-
-            grep -q 'obj-y += kernelsu/' kernel/Makefile || \
-              echo 'obj-y += kernelsu/' >> kernel/Makefile
+            cd kernelsu-next
+            bash scripts/setup.sh ../
             ;;
         esac
 
