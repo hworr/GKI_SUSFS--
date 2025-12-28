@@ -232,30 +232,36 @@ jobs:
           
           echo "Injecting KernelSU Next version 3.0.0..."
           
-          KBUILD_FILE="drivers/kernelsu/Kbuild"
-          
+           KBUILD_FILE="drivers/kernelsu/Kbuild"
+
           if [ -f "$KBUILD_FILE" ]; then
-            echo "Patching KernelSU Kbuild (remove fallback + inject version)..."
+            echo "Patching KernelSU Kbuild (full manual Bazel-safe injection)..."
           
-            # ❌ Entferne JEDE Fallback-Version
+            # ❌ Entferne Fallbacks & alte Auto-Logik
             sed -i '/KSU_VERSION_TAG_FALLBACK/d' "$KBUILD_FILE"
             sed -i '/KSU_VERSION_FALLBACK/d' "$KBUILD_FILE"
+            sed -i '/KSU_GIT_VERSION/d' "$KBUILD_FILE"
+            sed -i '/KSU_VERSION_TAG/d' "$KBUILD_FILE"
+            sed -i '/KSU_VERSION /d' "$KBUILD_FILE"
             sed -i '/0.0.1/d' "$KBUILD_FILE"
           
-            # ❌ Entferne evtl. alte Version-Injections
+            # ❌ Entferne alte Next-Injections
             sed -i '/KSU_NEXT_VERSION_/d' "$KBUILD_FILE"
           
-            # ✅ Korrekte Version explizit setzen
-            {
-              echo ""
-              echo "# --- KernelSU Next manual version injection ---"
-              echo "ccflags-y += -DKSU_NEXT_VERSION_MAJOR=3"
-              echo "ccflags-y += -DKSU_NEXT_VERSION_MINOR=0"
-              echo "ccflags-y += -DKSU_NEXT_VERSION_PATCH=0"
-              echo 'ccflags-y += -DKSU_NEXT_VERSION_STRING=\"3.0.0\"'
-              echo 'ccflags-y += -DKSU_VERSION_TAG=\"v3.0.0\"'
-              echo "# ------------------------------------------------"
-            } >> "$KBUILD_FILE"
+            # ✅ VOLLE MANUELLE VERSION (Bazel-kompatibel)
+            cat >> "$KBUILD_FILE" <<'EOF'
+          
+          # --- KernelSU Next manual version injection (Bazel safe) ---
+          ccflags-y += -DKSU_GIT_VERSION=3000
+          ccflags-y += -DKSU_VERSION=3000
+          ccflags-y += -DKSU_VERSION_TAG=\"v3.0.0\"
+          
+          ccflags-y += -DKSU_NEXT_VERSION_MAJOR=3
+          ccflags-y += -DKSU_NEXT_VERSION_MINOR=0
+          ccflags-y += -DKSU_NEXT_VERSION_PATCH=0
+          ccflags-y += -DKSU_NEXT_VERSION_STRING=\"3.0.0\"
+          # ----------------------------------------------------------
+          EOF
           fi
           
           KSU_KSUD_H="drivers/kernelsu/ksud.h"
