@@ -230,32 +230,24 @@ jobs:
           
           KCONFIG_FILE="drivers/kernelsu/Kconfig"
           if [ -f "$KCONFIG_FILE" ]; then
-            # Füge default y für CONFIG_KSU hinzu
-            python3 << 'PYTHON_SCRIPT'
-          import re
-          
-          with open('drivers/kernelsu/Kconfig', 'r') as f:
-              content = f.read()
-          
-          # Suche nach "config KSU" und füge "default y" hinzu
-          pattern = r'(config KSU\s+tristate[^\n]*\n)'
-          match = re.search(pattern, content)
-          if match:
-              # Prüfe ob default y schon vorhanden
-              rest = content[match.end():match.end()+200]
-              if 'default y' not in rest.split('config ')[0]:
-                  replacement = match.group(1) + '\tdefault y\n'
-                  content = content[:match.start()] + replacement + content[match.end():]
-                  print("Added default y to CONFIG_KSU")
-              else:
-                  print("CONFIG_KSU already has default y")
-          else:
-              print("config KSU not found in Kconfig")
-          
-          with open('drivers/kernelsu/Kconfig', 'w') as f:
-              f.write(content)
-          PYTHON_SCRIPT
-            echo "✓ Kconfig updated"
+            # Prüfe ob bereits default y hat
+            if ! grep -A5 "config KSU$" "$KCONFIG_FILE" | grep -q "default y"; then
+              # Nutze awk um default y nach tristate einzufügen
+              awk '
+                /^config KSU$/ { found=1 }
+                found && /tristate/ { 
+                  print
+                  print "\tdefault y"
+                  found=0
+                  next
+                }
+                { print }
+              ' "$KCONFIG_FILE" > "$KCONFIG_FILE.tmp"
+              mv "$KCONFIG_FILE.tmp" "$KCONFIG_FILE"
+              echo "✓ Set CONFIG_KSU default to y"
+            else
+              echo "CONFIG_KSU already has default y"
+            fi
           else
             echo "WARNING: Kconfig not found"
           fi
@@ -599,51 +591,29 @@ jobs:
             if grep -q "KSU_SUSFS" "$KCONFIG_FILE"; then
               echo "SUSFS options found in Kconfig"
               
-              # Einfacher Ansatz: Ersetze "bool" mit "bool ... default y"
-              # für alle SUSFS Optionen
+              # Einfacher Ansatz: Nutze awk um "default y" nach jeder bool/tristate Zeile einzufügen
+              # für config Blöcke die mit KSU beginnen
+              awk '
+                /^config KSU/ { in_ksu=1; print; next }
+                in_ksu && /^[[:space:]]*(bool|tristate)/ { 
+                  print
+                  # Prüfe ob nächste Zeile bereits default ist
+                  getline nextline
+                  if (nextline !~ /default/) {
+                    print "\tdefault y"
+                  }
+                  print nextline
+                  next
+                }
+                /^config [^K]/ || /^$/ { in_ksu=0 }
+                { print }
+              ' "$KCONFIG_FILE" > "$KCONFIG_FILE.new"
               
-              # Erstelle ein temporäres Python script für präzises Patching
-              python3 << 'PYTHON_SCRIPT'
-            import re
-            
-            with open('drivers/kernelsu/Kconfig', 'r') as f:
-                content = f.read()
-            
-            # Für jede config Option: füge "default y" hinzu falls nicht vorhanden
-            configs = re.findall(r'config (KSU_SUSFS\w*|KSU)\b', content)
-            print(f"Found configs: {configs}")
-            
-            for config in set(configs):
-                # Prüfe ob bereits default y hat
-                pattern = rf'(config {config}\s+(?:tristate|bool)[^\n]*\n)'
-                match = re.search(pattern, content)
-                if match:
-                    # Prüfe ob default y schon vorhanden ist
-                    config_block_start = match.end()
-                    next_config = content.find('config ', config_block_start)
-                    if next_config == -1:
-                        next_config = len(content)
-                    config_block = content[config_block_start:next_config]
-                    
-                    if 'default y' not in config_block:
-                        # Füge default y nach der bool/tristate Zeile ein
-                        replacement = match.group(1) + '\tdefault y\n'
-                        content = content[:match.start()] + replacement + content[match.end():]
-                        print(f"Added default y to {config}")
-                    else:
-                        print(f"{config} already has default y")
-
-                with open('drivers/kernelsu/Kconfig', 'w') as f:
-                    f.write(content)
-                
-                print("Kconfig updated successfully")
-                PYTHON_SCRIPT
+              mv "$KCONFIG_FILE.new" "$KCONFIG_FILE"
               
               echo ""
               echo "=== Updated Kconfig (SUSFS section) ==="
-              grep -A2 "config KSU" "$KCONFIG_FILE" | head -20
-              echo "..."
-              grep -B1 -A2 "SUSFS" "$KCONFIG_FILE" | head -40
+              grep -B1 -A3 "config KSU" "$KCONFIG_FILE" | head -50
               echo "========================================"
             else
               echo "WARNING: No SUSFS options in Kconfig!"
