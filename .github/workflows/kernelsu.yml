@@ -146,17 +146,9 @@ jobs:
               ;;
               
             "next")
-              # Für SUSFS: Verwende den next-susfs Branch von pershoot
-              if [ "$ENABLE_SUSFS" = "true" ]; then
-                echo "Installing KernelSU Next with SUSFS support (pershoot fork)..."
-                git clone --recurse-submodules https://github.com/pershoot/KernelSU-Next.git KernelSU
-                cd KernelSU
-                git checkout next-susfs || git checkout next
-                cd ..
-              else
-                echo "Installing KernelSU Next..."
-                git clone --recurse-submodules https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
-              fi
+              # Immer den offiziellen KernelSU-Next verwenden für aktuelle Version
+              echo "Installing KernelSU Next..."
+              git clone --recurse-submodules https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
               ;;
           esac
           
@@ -182,10 +174,17 @@ jobs:
           rm -rf drivers/kernelsu
           cp -r KernelSU/kernel drivers/kernelsu
           
-          # Version in Kbuild hardcoden
-          KBUILD_FILE="drivers/kernelsu/Kbuild"
-          if [ -f "$KBUILD_FILE" ]; then
-            echo "Patching Kbuild with version $KSU_VERSION ($KSU_COMMITS commits)..."
+          # Version in Kbuild ODER Makefile hardcoden
+          # KernelSU-Next verwendet Kbuild, manche Forks verwenden Makefile
+          KBUILD_FILE=""
+          if [ -f "drivers/kernelsu/Kbuild" ]; then
+            KBUILD_FILE="drivers/kernelsu/Kbuild"
+          elif [ -f "drivers/kernelsu/Makefile" ]; then
+            KBUILD_FILE="drivers/kernelsu/Makefile"
+          fi
+          
+          if [ -n "$KBUILD_FILE" ]; then
+            echo "Patching $KBUILD_FILE with version $KSU_VERSION ($KSU_COMMITS commits)..."
             
             # Backup
             cp "$KBUILD_FILE" "$KBUILD_FILE.original"
@@ -207,9 +206,12 @@ jobs:
             mv "$KBUILD_FILE.new" "$KBUILD_FILE"
             
             echo ""
-            echo "=== Patched Kbuild (first 30 lines) ==="
+            echo "=== Patched $KBUILD_FILE (first 30 lines) ==="
             head -30 "$KBUILD_FILE"
             echo "========================================"
+          else
+            echo "WARNING: Neither Kbuild nor Makefile found in drivers/kernelsu/"
+            ls -la drivers/kernelsu/
           fi
           
           # ZUSÄTZLICH: ksu.h patchen falls die Version dort definiert ist
@@ -707,16 +709,23 @@ jobs:
             fi
             
             # ============================================
-            # SUSFS in KernelSU Kbuild integrieren
+            # SUSFS in KernelSU Kbuild/Makefile integrieren
             # ============================================
             echo ""
-            echo "=== Integrating SUSFS into KernelSU Kbuild ==="
+            echo "=== Integrating SUSFS into KernelSU build ==="
             
-            KBUILD_FILE="drivers/kernelsu/Kbuild"
-            if [ -f "$KBUILD_FILE" ]; then
-              # Prüfe ob susfs bereits im Kbuild ist
-              if ! grep -q "susfs" "$KBUILD_FILE"; then
-                echo "Adding SUSFS to Kbuild..."
+            # Finde Kbuild oder Makefile
+            KSU_BUILD=""
+            if [ -f "drivers/kernelsu/Kbuild" ]; then
+              KSU_BUILD="drivers/kernelsu/Kbuild"
+            elif [ -f "drivers/kernelsu/Makefile" ]; then
+              KSU_BUILD="drivers/kernelsu/Makefile"
+            fi
+            
+            if [ -n "$KSU_BUILD" ]; then
+              # Prüfe ob susfs bereits vorhanden ist
+              if ! grep -q "susfs" "$KSU_BUILD"; then
+                echo "Adding SUSFS to $KSU_BUILD..."
                 
                 # Füge SUSFS object files hinzu
                 {
@@ -724,7 +733,7 @@ jobs:
                   echo "# SUSFS Integration"
                   echo "ccflags-\$(CONFIG_KSU_SUSFS) += -DKSU_SUSFS"
                   echo "kernelsu-\$(CONFIG_KSU_SUSFS) += susfs.o"
-                } >> "$KBUILD_FILE"
+                } >> "$KSU_BUILD"
                 
                 # Kopiere susfs.c nach drivers/kernelsu falls nicht vorhanden
                 if [ ! -f "drivers/kernelsu/susfs.c" ] && [ -f "fs/susfs.c" ]; then
@@ -732,15 +741,17 @@ jobs:
                   echo "  ✓ Copied susfs.c to drivers/kernelsu/"
                 fi
                 
-                echo "  ✓ Added SUSFS to Kbuild"
+                echo "  ✓ Added SUSFS to $KSU_BUILD"
               else
-                echo "SUSFS already in Kbuild"
+                echo "SUSFS already in $KSU_BUILD"
               fi
               
               echo ""
-              echo "=== Updated Kbuild (last 20 lines) ==="
-              tail -20 "$KBUILD_FILE"
+              echo "=== Updated $KSU_BUILD (last 20 lines) ==="
+              tail -20 "$KSU_BUILD"
               echo "======================================="
+            else
+              echo "WARNING: Neither Kbuild nor Makefile found in drivers/kernelsu/"
             fi
           else
             echo "WARNING: KSU SUSFS patch not found or drivers/kernelsu missing"
@@ -966,19 +977,25 @@ jobs:
           echo "KernelSU Commits: $KSU_COMMITS"
           echo ""
           
-          KBUILD_FILE="drivers/kernelsu/Kbuild"
+          # Finde Kbuild oder Makefile
+          KBUILD_FILE=""
+          if [ -f "drivers/kernelsu/Kbuild" ]; then
+            KBUILD_FILE="drivers/kernelsu/Kbuild"
+          elif [ -f "drivers/kernelsu/Makefile" ]; then
+            KBUILD_FILE="drivers/kernelsu/Makefile"
+          fi
           
-          if [ -f "$KBUILD_FILE" ]; then
-            echo "Patching Kbuild with hardcoded version..."
+          if [ -n "$KBUILD_FILE" ]; then
+            echo "Patching $KBUILD_FILE with hardcoded version..."
             
-            # Zeige aktuelle Kbuild (erste 15 Zeilen)
-            echo "=== Current Kbuild (first 15 lines) ==="
+            # Zeige aktuelle Datei (erste 15 Zeilen)
+            echo "=== Current $KBUILD_FILE (first 15 lines) ==="
             head -15 "$KBUILD_FILE"
             echo "========================================"
             
             # Prüfe ob bereits gepatcht
             if head -5 "$KBUILD_FILE" | grep -q "Hardcoded by GKI workflow"; then
-              echo "Kbuild already patched, updating values..."
+              echo "Already patched, updating values..."
               # Entferne alte Patch-Zeilen
               sed -i '/# ===================================================/d' "$KBUILD_FILE"
               sed -i '/# KernelSU Version - Hardcoded/d' "$KBUILD_FILE"
@@ -1003,13 +1020,13 @@ jobs:
             mv "$KBUILD_FILE.new" "$KBUILD_FILE"
             
             echo ""
-            echo "=== Patched Kbuild (first 20 lines) ==="
+            echo "=== Patched $KBUILD_FILE (first 20 lines) ==="
             head -20 "$KBUILD_FILE"
             echo "========================================"
           else
-            echo "ERROR: Kbuild not found at $KBUILD_FILE"
+            echo "WARNING: Neither Kbuild nor Makefile found at drivers/kernelsu/"
+            echo "Contents of drivers/kernelsu/:"
             ls -la drivers/kernelsu/ || echo "drivers/kernelsu not found!"
-            exit 1
           fi
           
           echo ""
