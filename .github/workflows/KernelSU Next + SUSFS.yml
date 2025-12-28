@@ -116,7 +116,7 @@ jobs:
     # --------------------------------------------------
     - name: Apply SUSFS 2.0 (KernelSU Next)
       run: |
-            cd $GITHUB_WORKSPACE/kernel_workspace
+            cd kernel
             
             BRANCH="${{ steps.vars.outputs.BRANCH }}"
             SUSFS_BRANCH="gki-${BRANCH}"
@@ -178,7 +178,7 @@ jobs:
               
     - name: Apply Additional Patches
       run: |
-            cd $GITHUB_WORKSPACE/kernel_workspace/common
+            cd common
             
             # Verstecke KernelSU Symbole (Anti-Detection)
             echo "Applying anti-detection patches..."
