@@ -84,6 +84,26 @@ jobs:
           echo "  LKM Mode: ${{ inputs.build_lkm }}"
           echo "================================"
 
+      - name: Prepare Flags
+        id: flags
+        run: |
+          echo "KSU_VARIANT=${{ inputs.kernelsu_variant }}" >> $GITHUB_OUTPUT
+          echo "BRANCH=${{ inputs.gki_branch }}" >> $GITHUB_OUTPUT
+
+          if [ "${{ inputs.enable_susfs }}" = "true" ]; then
+            echo "SUSFS=Enabled" >> $GITHUB_OUTPUT
+            echo "SUSFS_TAG=SUSFS" >> $GITHUB_OUTPUT
+          else
+            echo "SUSFS=Disabled" >> $GITHUB_OUTPUT
+            echo "SUSFS_TAG=NoSUSFS" >> $GITHUB_OUTPUT
+          fi
+
+          if [ "${{ inputs.build_lkm }}" = "true" ]; then
+            echo "LKM=Yes" >> $GITHUB_OUTPUT
+          else
+            echo "LKM=No" >> $GITHUB_OUTPUT
+          fi
+
       - name: Download Kernel Source
         run: |
           cd $GITHUB_WORKSPACE
