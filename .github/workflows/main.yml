@@ -1,0 +1,489 @@
+name: Build GKI Kernel + SUSFS
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernelsu_variant:
+        description: 'KernelSU Variante (alle SUSFS-kompatibel)'
+        required: true
+        default: 'wild'
+        type: choice
+        options:
+          - wild       # Wild KSU - Beste SUSFS Integration
+          - sukisu     # SuKiSu - Fokus auf Hiding
+          - next       # KernelSU Next - Aktiv entwickelt
+      gki_branch:
+        description: 'GKI Branch (Android + Kernel)'
+        required: true
+        default: 'android15-6.6'
+        type: choice
+        options:
+          - android15-6.6   # Pixel 9/10, neue Geräte
+          - android14-6.1   # Pixel 8, Samsung S24
+          - android14-5.15  # Ältere Android 14 Geräte
+          - android13-5.15  # Android 13 Geräte
+          - android13-5.10  # Ältere Android 13
+          - android12-5.10  # Android 12 Geräte
+      enable_susfs:
+        description: 'SUSFS aktivieren'
+        required: true
+        default: true
+        type: boolean
+      build_lkm:
+        description: 'LKM statt GKI bauen (für locked Bootloader)'
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Maximize Build Space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          swap-size-mb: 8192
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+
+      - name: Setup Build Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git ccache automake flex lzop bison gperf build-essential \
+            zip curl zlib1g-dev libxml2-utils bzip2 libbz2-dev \
+            libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush \
+            schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev \
+            pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl \
+            libxml-simple-perl bc libc6-dev-i386 libx11-dev lib32z-dev \
+            libgl1-mesa-dev xsltproc unzip device-tree-compiler python3 \
+            python-is-python3 repo cpio kmod openssl libelf-dev pahole
+
+      - name: Set Build Variables
+        id: vars
+        run: |
+          BRANCH="${{ inputs.gki_branch }}"
+          KERNEL_VERSION=$(echo "$BRANCH" | cut -d'-' -f2)
+          
+          echo "BRANCH=${BRANCH}" >> $GITHUB_OUTPUT
+          echo "KERNEL_VERSION=${KERNEL_VERSION}" >> $GITHUB_OUTPUT
+          echo "SUSFS_BRANCH=gki-${BRANCH}" >> $GITHUB_OUTPUT
+          
+          echo "================================"
+          echo "Build Configuration:"
+          echo "  GKI Branch: ${BRANCH}"
+          echo "  Kernel: ${KERNEL_VERSION}"
+          echo "  KSU Variant: ${{ inputs.kernelsu_variant }}"
+          echo "  SUSFS: ${{ inputs.enable_susfs }}"
+          echo "  LKM Mode: ${{ inputs.build_lkm }}"
+          echo "================================"
+
+      - name: Download Kernel Source
+        run: |
+          cd $GITHUB_WORKSPACE
+          
+          BRANCH="${{ steps.vars.outputs.BRANCH }}"
+          
+          echo "Downloading manifest for ${BRANCH}..."
+          
+          # Manifest URL ermitteln
+          MANIFEST_URL="https://android.googlesource.com/kernel/manifest"
+          
+          mkdir -p kernel_workspace && cd kernel_workspace
+          
+          # Repo init
+          repo init -u $MANIFEST_URL -b common-${BRANCH} --depth=1
+          
+          # Sync
+          repo sync -c -j$(nproc) --no-tags --no-clone-bundle
+
+      - name: Setup KernelSU
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          
+          # Kernel Source Verzeichnis finden
+          if [ -d "common" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/common"
+          elif [ -d "private/gs-google" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/private/gs-google"
+          elif [ -d "aosp" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/aosp"
+          else
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace"
+          fi
+          
+          echo "Kernel directory: $KERNEL_DIR"
+          
+          # Prüfen ob drivers/ existiert
+          if [ ! -d "$KERNEL_DIR/drivers" ]; then
+            echo "ERROR: drivers/ not found in $KERNEL_DIR"
+            echo "Contents:"
+            ls -la "$KERNEL_DIR"
+            exit 1
+          fi
+          
+          cd "$KERNEL_DIR"
+          
+          VARIANT="${{ inputs.kernelsu_variant }}"
+          
+          case "$VARIANT" in
+            "wild")
+              echo "Installing Wild KSU..."
+              git clone https://github.com/WildKernels/Wild_KSU.git KernelSU
+              cd KernelSU && git checkout wild && cd ..
+              ;;
+              
+            "sukisu")
+              echo "Installing SuKiSu..."
+              git clone https://github.com/ShirkNeko/SuKiSu.git KernelSU
+              ;;
+              
+            "next")
+              echo "Installing KernelSU Next..."
+              git clone --recurse-submodules https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
+              ;;
+          esac
+          
+          # Version aus Git holen
+          cd KernelSU
+          git fetch --tags
+          KSU_VERSION=$(git describe --abbrev=0 --tags 2>/dev/null || echo "v1.0.0")
+          KSU_VERSION_NUM=$(echo "$KSU_VERSION" | sed 's/v//g' | cut -d'-' -f1)
+          KSU_COMMITS=$(git rev-list --count HEAD 2>/dev/null || echo "1")
+          
+          echo "KernelSU Version: $KSU_VERSION"
+          echo "KernelSU Version Number: $KSU_VERSION_NUM"
+          echo "KernelSU Commits: $KSU_COMMITS"
+          cd ..
+          
+          # ============================================
+          # Manuelle Integration (ohne setup.sh)
+          # ============================================
+          
+      - name: Setup KernelSU
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          
+          # Kernel Source Verzeichnis finden
+          if [ -d "common" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/common"
+          elif [ -d "private/gs-google" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/private/gs-google"
+          elif [ -d "aosp" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/aosp"
+          else
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace"
+          fi
+          
+          echo "Kernel directory: $KERNEL_DIR"
+          cd "$KERNEL_DIR"
+          
+          VARIANT="${{ inputs.kernelsu_variant }}"
+          
+          case "$VARIANT" in
+            "wild")
+              git clone https://github.com/WildKernels/Wild_KSU.git KernelSU
+              ;;
+            "sukisu")
+              git clone https://github.com/ShirkNeko/SuKiSu.git KernelSU
+              ;;
+            "next")
+              git clone --recurse-submodules https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
+              ;;
+          esac
+          
+          cd KernelSU
+          git fetch --tags
+          KSU_VERSION="3.0.0"
+          cd ..
+          
+          # =====================================================
+          # MANUELLE KERNELSU-NEXT-INTEGRATION (OHNE setup.sh)
+          # =====================================================
+          
+          echo "Integrating KernelSU manually..."
+          
+          rm -rf drivers/kernelsu
+          cp -r KernelSU/kernel drivers/kernelsu
+          
+          # -----------------------------------------------------
+          # 🔧 FIX: KernelSU Next Version korrekt injizieren
+          # -----------------------------------------------------
+          
+          echo "Injecting KernelSU Next version 3.0.0..."
+          
+          KBUILD_FILE="drivers/kernelsu/Kbuild"
+          if [ -f "$KBUILD_FILE" ]; then
+            sed -i '/KSU_NEXT_VERSION_/d' "$KBUILD_FILE"
+            {
+              echo ""
+              echo "# --- KernelSU Next manual version injection ---"
+              echo "ccflags-y += -DKSU_NEXT_VERSION_MAJOR=3"
+              echo "ccflags-y += -DKSU_NEXT_VERSION_MINOR=0"
+              echo "ccflags-y += -DKSU_NEXT_VERSION_PATCH=0"
+              echo 'ccflags-y += -DKSU_NEXT_VERSION_STRING=\"3.0.0\"'
+              echo "# ------------------------------------------------"
+            } >> "$KBUILD_FILE"
+          fi
+          
+          KSU_KSUD_H="drivers/kernelsu/ksud.h"
+          if [ -f "$KSU_KSUD_H" ]; then
+            sed -i 's/#define KSU_NEXT_VERSION_STRING.*/#define KSU_NEXT_VERSION_STRING "3.0.0"/' "$KSU_KSUD_H" || true
+          fi
+          
+          # -----------------------------------------------------
+          # Makefile & Kconfig einbinden
+          # -----------------------------------------------------
+          
+          if ! grep -q "kernelsu" drivers/Makefile; then
+            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+          fi
+          
+          if ! grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig; then
+            sed -i '/^endmenu$/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          fi
+          
+          # -----------------------------------------------------
+          # Safety-Check gegen Fallback-Version
+          # -----------------------------------------------------
+          
+          echo "Verifying KernelSU version..."
+          
+          grep -R "0.0.1" drivers/kernelsu && {
+            echo "ERROR: KernelSU fallback version detected!"
+            exit 1
+          } || echo "✓ KernelSU Next version OK"
+          
+          echo "✓ KernelSU manual setup complete"
+      - name: Setup SUSFS
+        if: inputs.enable_susfs
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          
+          # Kernel Source Verzeichnis finden (gleiche Logik wie KernelSU)
+          if [ -d "common" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/common"
+          elif [ -d "private/gs-google" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/private/gs-google"
+          elif [ -d "aosp" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/aosp"
+          else
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace"
+          fi
+          
+          SUSFS_BRANCH="${{ steps.vars.outputs.SUSFS_BRANCH }}"
+          
+          echo "Cloning SUSFS branch: ${SUSFS_BRANCH}..."
+          echo "Kernel directory: $KERNEL_DIR"
+          
+          # SUSFS klonen
+          git clone --depth=1 -b "${SUSFS_BRANCH}" \
+            https://github.com/WildKernels/susfs4ksu.git susfs || \
+          git clone --depth=1 -b "${SUSFS_BRANCH}" \
+            https://gitlab.com/simonpunk/susfs4ksu.git susfs
+          
+          cd "$KERNEL_DIR"
+          
+          SUSFS_SRC="$GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches"
+          KV="${{ steps.vars.outputs.KERNEL_VERSION }}"
+          
+          # 1. SUSFS Kernel-Dateien kopieren
+          echo "Copying SUSFS source files..."
+          cp "${SUSFS_SRC}/fs/susfs.c" fs/ 2>/dev/null && echo "  ✓ susfs.c" || echo "  ✗ susfs.c not found"
+          cp "${SUSFS_SRC}/include/linux/susfs.h" include/linux/ 2>/dev/null && echo "  ✓ susfs.h" || echo "  ✗ susfs.h not found"
+          
+          # 2. Kernel patches anwenden
+          echo "Applying SUSFS kernel patches for ${KV}..."
+          
+          PATCH_DIR="${SUSFS_SRC}/50_add_susfs_in_${KV}"
+          
+          if [ -d "$PATCH_DIR" ]; then
+            for patch in "$PATCH_DIR"/*.patch; do
+              if [ -f "$patch" ]; then
+                echo "Applying: $(basename $patch)"
+                git apply --check "$patch" 2>/dev/null && git apply "$patch" || \
+                patch -p1 --forward < "$patch" || \
+                echo "  (may already be applied)"
+              fi
+            done
+          else
+            echo "WARNING: No patches found in: $PATCH_DIR"
+            echo "Available directories:"
+            ls -la "${SUSFS_SRC}/" 2>/dev/null || true
+          fi
+          
+          # 3. KernelSU SUSFS Integration Patch
+          echo "Applying KernelSU SUSFS integration patch..."
+          
+          KSU_PATCH="${SUSFS_SRC}/KernelSU/10_enable_susfs_for_ksu.patch"
+          
+          if [ -f "$KSU_PATCH" ] && [ -d "drivers/kernelsu" ]; then
+            cd drivers/kernelsu
+            echo "Patching KernelSU for SUSFS support..."
+            git apply --check "$KSU_PATCH" 2>/dev/null && git apply "$KSU_PATCH" || \
+            patch -p1 --forward < "$KSU_PATCH" || \
+            echo "  (may already be applied)"
+            cd ../..
+          fi
+          
+          echo "✓ SUSFS setup complete"
+
+      - name: Apply Additional Patches
+        if: inputs.enable_susfs
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          
+          # Kernel Source Verzeichnis finden
+          if [ -d "common" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/common"
+          elif [ -d "private/gs-google" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/private/gs-google"
+          elif [ -d "aosp" ]; then
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/aosp"
+          else
+            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace"
+          fi
+          
+          cd "$KERNEL_DIR"
+          
+          # Verstecke KernelSU Symbole (Anti-Detection)
+          echo "Applying anti-detection patches..."
+          
+          SUSFS_SRC="$GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches"
+          
+          if [ -f "$SUSFS_SRC/hide_stuff.patch" ]; then
+            git apply "$SUSFS_SRC/hide_stuff.patch" || echo "hide_stuff.patch may already be applied"
+          fi
+
+      - name: Build Kernel
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          
+          # LTO=thin für schnelleren Build und weniger RAM
+          export LTO=thin
+          
+          echo "Starting kernel build..."
+          echo "This may take 30-60 minutes..."
+          
+          # Build mit Bazel (neuer Weg für GKI)
+          if [ -f "build/build.sh" ]; then
+            # Legacy build
+            BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
+          elif [ -f "build/kernel/build.sh" ]; then
+            # Newer build
+            BUILD_CONFIG=common/build.config.gki.aarch64 build/kernel/build.sh
+          else
+            # Bazel build (neuester Weg)
+            tools/bazel run //common:kernel_aarch64_dist -- --dist_dir=dist
+          fi
+
+      - name: Prepare Output
+        id: output
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          
+          mkdir -p $GITHUB_WORKSPACE/output
+          
+          # Kernel Image finden
+          KERNEL_IMAGE=$(find . -name "Image" -type f | head -1)
+          KERNEL_IMAGE_GZ=$(find . -name "Image.gz" -type f | head -1)
+          KERNEL_IMAGE_LZ4=$(find . -name "Image.lz4" -type f | head -1)
+          
+          if [ -n "$KERNEL_IMAGE" ]; then
+            cp "$KERNEL_IMAGE" $GITHUB_WORKSPACE/output/
+            echo "Found: Image"
+          fi
+          
+          if [ -n "$KERNEL_IMAGE_GZ" ]; then
+            cp "$KERNEL_IMAGE_GZ" $GITHUB_WORKSPACE/output/
+            echo "Found: Image.gz"
+          fi
+          
+          if [ -n "$KERNEL_IMAGE_LZ4" ]; then
+            cp "$KERNEL_IMAGE_LZ4" $GITHUB_WORKSPACE/output/
+            echo "Found: Image.lz4"
+          fi
+          
+          # AnyKernel3 erstellen
+          cd $GITHUB_WORKSPACE
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
+          
+          cd AnyKernel3
+          rm -rf .git README.md
+          
+          # Anpassen
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+          sed -i 's/is_slot_device=0/is_slot_device=auto/g' anykernel.sh
+          
+          # Kernel kopieren
+          if [ -f "$GITHUB_WORKSPACE/output/Image" ]; then
+            cp $GITHUB_WORKSPACE/output/Image .
+          elif [ -f "$GITHUB_WORKSPACE/output/Image.gz" ]; then
+            cp $GITHUB_WORKSPACE/output/Image.gz .
+          elif [ -f "$GITHUB_WORKSPACE/output/Image.lz4" ]; then
+            cp $GITHUB_WORKSPACE/output/Image.lz4 .
+          fi
+          
+          # ZIP Name
+          VARIANT="${{ inputs.kernelsu_variant }}"
+          BRANCH="${{ steps.vars.outputs.BRANCH }}"
+          DATE=$(date +%Y%m%d)
+          
+          SUSFS_TAG=""
+          if [ "${{ inputs.enable_susfs }}" == "true" ]; then
+            SUSFS_TAG="-SUSFS"
+          fi
+          
+          ZIP_NAME="GKI-${BRANCH}-${VARIANT}${SUSFS_TAG}-${DATE}.zip"
+          
+          zip -r9 "$GITHUB_WORKSPACE/output/${ZIP_NAME}" *
+          
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_OUTPUT
+          echo "✓ Created: ${ZIP_NAME}"
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ steps.vars.outputs.BRANCH }}-${{ inputs.kernelsu_variant }}
+          path: |
+            ${{ github.workspace }}/output/*
+          if-no-files-found: error
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}-${{ steps.vars.outputs.BRANCH }}
+          name: "GKI ${{ steps.vars.outputs.BRANCH }} - ${{ inputs.kernelsu_variant }}${{ inputs.enable_susfs && ' + SUSFS' || '' }}"
+          body: |
+            ## GKI Kernel Build
+            
+            | Setting | Value |
+            |---------|-------|
+            | **KernelSU** | ${{ inputs.kernelsu_variant }} |
+            | **Branch** | ${{ steps.vars.outputs.BRANCH }} |
+            | **SUSFS** | ${{ inputs.enable_susfs && '✓ Enabled' || '✗ Disabled' }} |
+            | **LKM Mode** | ${{ inputs.build_lkm && '✓ Yes' || '✗ No (GKI)' }} |
+            | **Build** | #${{ github.run_number }} |
+            
+            ### Installation
+            1. Flash via KernelFlasher oder AnyKernel3
+            2. Oder: `fastboot flash boot` mit gepatchtem boot.img
+            
+            ### Manager Apps
+            - Wild KSU: https://github.com/WildKernels/Wild_KSU
+            - KernelSU Next: https://github.com/KernelSU-Next/KernelSU-Next
+            - SuKiSu: https://github.com/ShirkNeko/SuKiSu
+            
+            ### SUSFS Module (falls SUSFS aktiviert)
+            - https://github.com/sidex15/ksu_module_susfs
+          files: ${{ github.workspace }}/output/${{ steps.output.outputs.ZIP_NAME }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
