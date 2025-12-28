@@ -150,7 +150,7 @@ jobs:
     - name: Setup SUSFS
       if: inputs.enable_susfs
       run: |
-            cd $GITHUB_WORKSPACE/kernel_workspace
+            cd kernel
             
             # Kernel Source Verzeichnis finden (gleiche Logik wie KernelSU)
             if [ -d "common" ]; then
