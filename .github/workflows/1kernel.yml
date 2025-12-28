@@ -105,6 +105,7 @@ jobs:
 # --------------------------------------------------
 # SUSFS
 # --------------------------------------------------
+
       - name: Setup SUSFS
         if: inputs.enable_susfs
         run: |
@@ -112,9 +113,14 @@ jobs:
       
           cd kernel_workspace
       
-          # SUSFS sauber neu klonen
+          # SUSFS sauber neu klonen (GKI-Branch!)
           rm -rf susfs
-          git clone --depth=1 https://github.com/WildKernels/susfs4ksu.git susfs
+          
+          git clone --depth=1 \
+            -b gki-${{ steps.vars.outputs.BRANCH }} \
+            https://github.com/WildKernels/susfs4ksu.git susfs
+          
+          echo "✓ SUSFS cloned (branch: gki-${{ steps.vars.outputs.BRANCH }})"
       
           cd common
       
