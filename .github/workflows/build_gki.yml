@@ -185,52 +185,30 @@ jobs:
             head -80 "$KBUILD_FILE"
             echo "========================================="
             
-            # Methode: Ersetze die komplette Datei, aber behalte die obj-Zeilen
-            # Extrahiere alle Zeilen die NICHT mit Version zu tun haben
-            grep -v -E "(KSU_GIT_VERSION|KSU_VERSION|version|ifeq|endif|shell.*git|warning|info.*fallback)" "$KBUILD_FILE" > "$KBUILD_FILE.cleaned" || true
+            # NEUER ANSATZ: Ersetze NUR die $(shell ...) Befehle mit festen Werten
+            # Die ifeq/else/endif Struktur bleibt intakt!
             
-            # Erstelle neue Kbuild mit fester Version am Anfang
-            {
-              echo "# KernelSU-Next Kbuild - Patched by workflow"
-              echo "# Version: $KSU_VERSION ($KSU_COMMITS commits)"
-              echo ""
-              echo "ccflags-y += -DKSU_VERSION=$KSU_COMMITS"
-              echo 'ccflags-y += -DKSU_VERSION_TAG=\"'"$KSU_VERSION"'\"'
-              echo ""
-              cat "$KBUILD_FILE.cleaned"
-            } > "$KBUILD_FILE.new"
+            # Ersetze KSU_GIT_VERSION shell-Befehl
+            sed -i 's/KSU_GIT_VERSION\s*:=\s*$(shell[^)]*)/KSU_GIT_VERSION := '"$KSU_COMMITS"'/' "$KBUILD_FILE"
             
-            mv "$KBUILD_FILE.new" "$KBUILD_FILE"
-            rm -f "$KBUILD_FILE.cleaned"
+            # Ersetze KSU_VERSION_TAG shell-Befehl  
+            sed -i 's/KSU_VERSION_TAG\s*:=\s*$(shell[^)]*)/KSU_VERSION_TAG := '"$KSU_VERSION"'/' "$KBUILD_FILE"
+            
+            # Falls es verschachtelte $() gibt, nochmal mit anderem Pattern
+            sed -i 's/$(shell cd[^)]*git[^)]*)/'"$KSU_COMMITS"'/g' "$KBUILD_FILE"
+            sed -i 's/$(shell git[^)]*)/'"$KSU_COMMITS"'/g' "$KBUILD_FILE"
             
             echo ""
-            echo "=== Patched Kbuild ==="
-            cat "$KBUILD_FILE"
-            echo "======================"
-          fi
-          
-          # ZUSÄTZLICH: Falls es ein Makefile gibt, auch dort patchen
-          KSU_MAKEFILE="drivers/kernelsu/Makefile"
-          if [ -f "$KSU_MAKEFILE" ]; then
-            echo "Also patching Makefile..."
-            sed -i "s/\$(shell.*git.*describe.*)/$KSU_VERSION/g" "$KSU_MAKEFILE" || true
-            sed -i "s/\$(shell.*rev-list.*count.*)/$KSU_COMMITS/g" "$KSU_MAKEFILE" || true
+            echo "=== Patched Kbuild (first 80 lines) ==="
+            head -80 "$KBUILD_FILE"
+            echo "========================================"
           fi
           
           # ZUSÄTZLICH: ksu.h patchen falls die Version dort definiert ist
           KSU_H="drivers/kernelsu/ksu.h"
           if [ -f "$KSU_H" ]; then
             echo "Patching ksu.h..."
-            # Zeige original
-            echo "=== Original ksu.h (grep VERSION) ==="
-            grep -i "VERSION" "$KSU_H" || echo "(keine VERSION Zeilen gefunden)"
-            
-            # Ersetze die Makros
-            sed -i "s/#define KERNEL_SU_VERSION.*/#define KERNEL_SU_VERSION $KSU_COMMITS/" "$KSU_H" || true
             sed -i 's/#define KERNEL_SU_VERSION_TAG.*/#define KERNEL_SU_VERSION_TAG "'"$KSU_VERSION"'"/' "$KSU_H" || true
-            
-            # Falls KSU_VERSION_TAG über KSU_VERSION_TAG referenziert wird
-            sed -i "s/KSU_VERSION_TAG$/\"$KSU_VERSION\"/" "$KSU_H" || true
           fi
           
           # Makefile in drivers/Makefile hinzufügen
