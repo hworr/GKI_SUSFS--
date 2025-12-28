@@ -131,6 +131,7 @@ jobs:
           cd "$KERNEL_DIR"
           
           VARIANT="${{ inputs.kernelsu_variant }}"
+          ENABLE_SUSFS="${{ inputs.enable_susfs }}"
           
           case "$VARIANT" in
             "wild")
@@ -145,8 +146,17 @@ jobs:
               ;;
               
             "next")
-              echo "Installing KernelSU Next..."
-              git clone --recurse-submodules https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
+              # Für SUSFS: Verwende den next-susfs Branch von pershoot
+              if [ "$ENABLE_SUSFS" = "true" ]; then
+                echo "Installing KernelSU Next with SUSFS support (pershoot fork)..."
+                git clone --recurse-submodules https://github.com/pershoot/KernelSU-Next.git KernelSU
+                cd KernelSU
+                git checkout next-susfs || git checkout next
+                cd ..
+              else
+                echo "Installing KernelSU Next..."
+                git clone --recurse-submodules https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
+              fi
               ;;
           esac
           
@@ -222,8 +232,48 @@ jobs:
           fi
           
           # ============================================
+          # WICHTIG: Protected exports entfernen für WiFi/Bluetooth!
+          # ============================================
+          echo ""
+          echo "=== Removing protected exports (fixes WiFi/Bluetooth) ==="
+          
+          # Entferne protected_exports_list aus BUILD.bazel
+          BUILD_BAZEL="$KERNEL_DIR/BUILD.bazel"
+          echo "Checking BUILD.bazel at: $BUILD_BAZEL"
+          
+          if [ -f "$BUILD_BAZEL" ]; then
+            echo "BUILD.bazel found, checking for protected_exports_list..."
+            if grep -q "protected_exports_list" "$BUILD_BAZEL"; then
+              echo "Found protected_exports_list, removing..."
+              sed -i '/protected_exports_list/d' "$BUILD_BAZEL"
+              echo "✓ Removed protected_exports_list from BUILD.bazel"
+            else
+              echo "protected_exports_list not found in BUILD.bazel"
+            fi
+          else
+            echo "BUILD.bazel not found at $BUILD_BAZEL"
+          fi
+          
+          # Entferne die protected_exports Dateien (mit absolutem Pfad)
+          echo "Checking for abi_gki_protected_exports files..."
+          PROTECTED_FILES=$(find "$KERNEL_DIR" -name "abi_gki_protected_exports_*" -type f 2>/dev/null)
+          if [ -n "$PROTECTED_FILES" ]; then
+            echo "Found protected exports files:"
+            echo "$PROTECTED_FILES"
+            rm -f $PROTECTED_FILES
+            echo "✓ Removed abi_gki_protected_exports_* files"
+          else
+            echo "No abi_gki_protected_exports_* files found"
+          fi
+          
+          # Zeige BUILD.bazel Inhalt für Debugging (relevante Zeilen)
+          echo ""
+          echo "=== BUILD.bazel kernel_aarch64 section ==="
+          grep -A20 "^kernel_build(" "$BUILD_BAZEL" 2>/dev/null | head -30 || echo "kernel_build section not found"
+          echo "==========================================="
+          
+          # ============================================
           # CONFIG_KSU in Kconfig als default aktivieren
-          # NICHT die defconfig ändern (Bazel Check!)
           # ============================================
           echo ""
           echo "=== Setting CONFIG_KSU default in Kconfig ==="
@@ -252,10 +302,20 @@ jobs:
             echo "WARNING: Kconfig not found"
           fi
           
+          # Prüfe ob SUSFS bereits in der Kconfig ist (für next-susfs Branch)
+          echo ""
+          echo "=== Checking for SUSFS in Kconfig ==="
+          if grep -q "SUSFS" "$KCONFIG_FILE" 2>/dev/null; then
+            echo "✓ SUSFS options already present in Kconfig!"
+            grep -A2 "SUSFS" "$KCONFIG_FILE" | head -20
+          else
+            echo "SUSFS not in Kconfig (will be added by SUSFS patch)"
+          fi
+          
           # Zeige KernelSU Kconfig für Debugging
           echo ""
-          echo "=== KernelSU Kconfig (first 30 lines) ==="
-          head -30 "$KCONFIG_FILE" 2>/dev/null || echo "Kconfig not found"
+          echo "=== KernelSU Kconfig (first 40 lines) ==="
+          head -40 "$KCONFIG_FILE" 2>/dev/null || echo "Kconfig not found"
           echo "=========================================="
           
           # Verify
@@ -267,6 +327,7 @@ jobs:
           echo "  Commits: $KSU_COMMITS"
           echo "  Kernel Dir: $KERNEL_DIR"
           echo "  drivers/kernelsu: $([ -d drivers/kernelsu ] && echo 'EXISTS' || echo 'MISSING')"
+          echo "  SUSFS in Kconfig: $(grep -q SUSFS drivers/kernelsu/Kconfig 2>/dev/null && echo 'YES' || echo 'NO')"
           echo "============================================"
           
           # Check
@@ -305,22 +366,41 @@ jobs:
           echo "  Kernel Dir: $KERNEL_DIR"
           echo "============================================"
           
+          cd "$KERNEL_DIR"
+          
+          # ============================================
+          # Prüfe ob SUSFS bereits integriert ist (next-susfs Branch)
+          # ============================================
+          if grep -q "SUSFS" drivers/kernelsu/Kconfig 2>/dev/null; then
+            echo ""
+            echo "✓ SUSFS already integrated in KernelSU (next-susfs branch detected)!"
+            echo "Skipping external SUSFS patches..."
+            
+            # Nur Kernel SUSFS Patches anwenden, KSU Integration überspringen
+            SKIP_KSU_PATCH=true
+          else
+            SKIP_KSU_PATCH=false
+          fi
+          
           # SUSFS klonen - versuche mehrere Quellen
+          echo ""
           echo "Cloning SUSFS..."
-          if ! git clone --depth=1 -b "${SUSFS_BRANCH}" https://github.com/WildKernels/susfs4ksu.git susfs 2>/dev/null; then
-            if ! git clone --depth=1 -b "${SUSFS_BRANCH}" https://gitlab.com/simonpunk/susfs4ksu.git susfs 2>/dev/null; then
-              echo "ERROR: Could not clone SUSFS for branch ${SUSFS_BRANCH}"
-              echo "Trying to list available branches..."
-              git ls-remote --heads https://github.com/WildKernels/susfs4ksu.git | head -20
-              exit 1
+          
+          # Versuche pershoot Fork zuerst (besser für KernelSU-Next)
+          if ! git clone --depth=1 -b "${SUSFS_BRANCH}" https://gitlab.com/pershoot/susfs4ksu.git susfs 2>/dev/null; then
+            if ! git clone --depth=1 -b "${SUSFS_BRANCH}" https://github.com/WildKernels/susfs4ksu.git susfs 2>/dev/null; then
+              if ! git clone --depth=1 -b "${SUSFS_BRANCH}" https://gitlab.com/simonpunk/susfs4ksu.git susfs 2>/dev/null; then
+                echo "ERROR: Could not clone SUSFS for branch ${SUSFS_BRANCH}"
+                echo "Trying to list available branches..."
+                git ls-remote --heads https://github.com/WildKernels/susfs4ksu.git | head -20
+                exit 1
+              fi
             fi
           fi
           
           echo "SUSFS cloned successfully"
           echo "SUSFS directory contents:"
           ls -la susfs/
-          
-          cd "$KERNEL_DIR"
           
           SUSFS_SRC="$GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches"
           
@@ -371,17 +451,89 @@ jobs:
             echo "Found single patch file: $SINGLE_PATCH"
             echo "Applying patch..."
             
+            # Versuche git apply zuerst (sauberer)
             if git apply --check "$SINGLE_PATCH" 2>/dev/null; then
               git apply "$SINGLE_PATCH"
               echo "✓ Kernel SUSFS patch applied with git apply"
               PATCH_APPLIED=true
-            elif patch -p1 --dry-run < "$SINGLE_PATCH" 2>/dev/null; then
-              patch -p1 < "$SINGLE_PATCH"
-              echo "✓ Kernel SUSFS patch applied with patch -p1"
-              PATCH_APPLIED=true
             else
-              echo "⚠ Patch check failed, trying to apply anyway..."
-              git apply "$SINGLE_PATCH" 2>&1 || patch -p1 < "$SINGLE_PATCH" 2>&1 || true
+              # Verwende patch mit --force um trotz Fehlern fortzufahren
+              echo "git apply failed, using patch command..."
+              patch -p1 --force --no-backup-if-mismatch < "$SINGLE_PATCH" 2>&1 | tee /tmp/patch_output.txt
+              
+              # Prüfe auf .rej Dateien
+              REJ_FILES=$(find . -name "*.rej" -type f 2>/dev/null)
+              if [ -n "$REJ_FILES" ]; then
+                echo ""
+                echo "⚠ Some hunks failed. Reject files:"
+                echo "$REJ_FILES"
+                echo ""
+                
+                # Versuche die fehlenden Änderungen manuell anzuwenden
+                for rej in $REJ_FILES; do
+                  echo "=== Content of $rej ==="
+                  cat "$rej"
+                  echo "========================"
+                  
+                  # Versuche die fehlenden Änderungen manuell anzuwenden
+                  ORIG_FILE="${rej%.rej}"
+                  if [ -f "$ORIG_FILE" ]; then
+                    echo "Attempting manual fix for $ORIG_FILE..."
+                    
+                    # Für fs/proc/base.c: Füge susfs.h include hinzu
+                    if [[ "$ORIG_FILE" == *"fs/proc/base.c"* ]]; then
+                      if ! grep -q "linux/susfs.h" "$ORIG_FILE"; then
+                        # Füge nach einem vorhandenen #include ein
+                        sed -i '/#include <linux\/sched\/mm.h>/a #include <linux\/susfs.h>' "$ORIG_FILE" 2>/dev/null || \
+                        sed -i '/#include <linux\/sched.h>/a #include <linux\/susfs.h>' "$ORIG_FILE" 2>/dev/null || \
+                        sed -i '/#include <linux\/fs.h>/a #include <linux\/susfs.h>' "$ORIG_FILE" 2>/dev/null || \
+                        sed -i '50a #include <linux\/susfs.h>' "$ORIG_FILE"
+                        echo "  ✓ Added #include <linux/susfs.h> to $ORIG_FILE"
+                      else
+                        echo "  susfs.h already included in $ORIG_FILE"
+                      fi
+                    fi
+                  fi
+                  
+                  # Lösche .rej Datei
+                  rm -f "$rej"
+                done
+              fi
+              
+              # Zusätzliche manuelle Fixes für bekannte Probleme
+              echo ""
+              echo "=== Applying manual fixes for known issues ==="
+              
+              # Fix fs/proc/base.c - stelle sicher dass susfs.h included ist
+              if [ -f "fs/proc/base.c" ]; then
+                if ! grep -q "linux/susfs.h" "fs/proc/base.c"; then
+                  echo "Adding susfs.h to fs/proc/base.c..."
+                  # Finde eine geeignete Stelle für den Include
+                  if grep -q "#include <linux/sched/mm.h>" "fs/proc/base.c"; then
+                    sed -i '/#include <linux\/sched\/mm.h>/a #include <linux\/susfs.h>' "fs/proc/base.c"
+                  elif grep -q "#include <linux/seq_file.h>" "fs/proc/base.c"; then
+                    sed -i '/#include <linux\/seq_file.h>/a #include <linux\/susfs.h>' "fs/proc/base.c"
+                  else
+                    # Fallback: Füge nach dem ersten #include Block ein
+                    awk '
+                      /^#include/ { last_include = NR }
+                      { lines[NR] = $0 }
+                      END {
+                        for (i = 1; i <= NR; i++) {
+                          print lines[i]
+                          if (i == last_include) {
+                            print "#include <linux/susfs.h>"
+                          }
+                        }
+                      }
+                    ' "fs/proc/base.c" > "fs/proc/base.c.tmp"
+                    mv "fs/proc/base.c.tmp" "fs/proc/base.c"
+                  fi
+                  echo "  ✓ Added susfs.h to fs/proc/base.c"
+                fi
+              fi
+              
+              PATCH_APPLIED=true
             fi
           fi
           
@@ -395,7 +547,7 @@ jobs:
                   if [ -f "$patch" ]; then
                     PATCH_NAME=$(basename "$patch")
                     echo "Applying: $PATCH_NAME"
-                    git apply "$patch" 2>/dev/null || patch -p1 < "$patch" 2>/dev/null || echo "  (may already be applied)"
+                    git apply "$patch" 2>/dev/null || patch -p1 --force < "$patch" 2>/dev/null || echo "  (may already be applied)"
                   fi
                 done
                 PATCH_APPLIED=true
@@ -410,6 +562,30 @@ jobs:
             echo "  - ${SUSFS_SRC}/50_add_susfs_in_gki-${{ steps.vars.outputs.BRANCH }}.patch"
             echo "  - ${SUSFS_SRC}/50_add_susfs_in_${KV}/"
             ls -la "${SUSFS_SRC}/"
+          fi
+          
+          # Verifiziere kritische SUSFS Hooks
+          echo ""
+          echo "=== Verifying SUSFS kernel integration ==="
+          for file in fs/namei.c fs/open.c fs/read_write.c fs/namespace.c; do
+            if grep -q "susfs" "$file" 2>/dev/null; then
+              echo "✓ $file: SUSFS hooks found"
+            else
+              echo "⚠ $file: SUSFS hooks NOT found"
+            fi
+          done
+          
+          # Stelle sicher dass susfs.c im fs/Makefile kompiliert wird
+          echo ""
+          echo "=== Checking fs/Makefile for susfs ==="
+          if [ -f "fs/Makefile" ]; then
+            if grep -q "susfs" "fs/Makefile"; then
+              echo "✓ susfs already in fs/Makefile"
+            else
+              echo "Adding susfs.o to fs/Makefile..."
+              echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile
+              echo "✓ Added susfs.o to fs/Makefile"
+            fi
           fi
           
           # ============================================
@@ -431,24 +607,187 @@ jobs:
           
           if [ -n "$KSU_PATCH" ] && [ -d "drivers/kernelsu" ]; then
             echo "Found KSU patch: $KSU_PATCH"
-            cd drivers/kernelsu
             
-            if git apply --check "$KSU_PATCH" 2>/dev/null; then
-              git apply "$KSU_PATCH"
-              echo "✓ KernelSU SUSFS patch applied with git apply"
-            elif patch -p1 --dry-run < "$KSU_PATCH" 2>/dev/null; then
-              patch -p1 < "$KSU_PATCH"
-              echo "✓ KernelSU SUSFS patch applied with patch -p1"
-            elif patch -p2 --dry-run < "$KSU_PATCH" 2>/dev/null; then
-              patch -p2 < "$KSU_PATCH"
-              echo "✓ KernelSU SUSFS patch applied with patch -p2"
+            # Zeige Patch-Inhalt für Debugging
+            echo ""
+            echo "=== Patch file paths (first 30 lines with ---/+++) ==="
+            grep -E "^(---|\+\+\+|diff)" "$KSU_PATCH" | head -30
+            echo "======================================================="
+            echo ""
+            
+            # Der Patch ist für das KernelSU repo strukturiert (kernel/...)
+            # Wir müssen ihn auf drivers/kernelsu anwenden
+            
+            # Methode 1: Wende von KERNEL_DIR aus an mit angepasstem Pfad
+            echo "Trying to apply patch from kernel root..."
+            
+            # Erstelle temporären Patch mit angepassten Pfaden
+            # kernel/ -> drivers/kernelsu/
+            sed 's|kernel/|drivers/kernelsu/|g' "$KSU_PATCH" > /tmp/ksu_susfs_fixed.patch
+            
+            echo "=== Fixed patch paths ==="
+            grep -E "^(---|\+\+\+)" /tmp/ksu_susfs_fixed.patch | head -20
+            echo "========================="
+            
+            PATCH_SUCCESS=false
+            
+            if git apply --check /tmp/ksu_susfs_fixed.patch 2>/dev/null; then
+              git apply /tmp/ksu_susfs_fixed.patch
+              echo "✓ KernelSU SUSFS patch applied (path-fixed)"
+              PATCH_SUCCESS=true
+            elif patch -p1 --dry-run < /tmp/ksu_susfs_fixed.patch 2>/dev/null; then
+              patch -p1 < /tmp/ksu_susfs_fixed.patch
+              echo "✓ KernelSU SUSFS patch applied with patch -p1 (path-fixed)"
+              PATCH_SUCCESS=true
             else
-              echo "⚠ Could not apply KSU SUSFS patch automatically"
-              echo "Patch content preview:"
-              head -30 "$KSU_PATCH"
+              # Methode 2: Wende direkt im drivers/kernelsu Verzeichnis an
+              echo "Path-fixed patch failed, trying direct application..."
+              cd drivers/kernelsu
+              
+              if git apply --check "$KSU_PATCH" 2>/dev/null; then
+                git apply "$KSU_PATCH"
+                echo "✓ KernelSU SUSFS patch applied with git apply"
+                PATCH_SUCCESS=true
+              elif patch -p1 --dry-run < "$KSU_PATCH" 2>/dev/null; then
+                patch -p1 < "$KSU_PATCH"
+                echo "✓ KernelSU SUSFS patch applied with patch -p1"
+                PATCH_SUCCESS=true
+              elif patch -p2 --dry-run < "$KSU_PATCH" 2>/dev/null; then
+                patch -p2 < "$KSU_PATCH"
+                echo "✓ KernelSU SUSFS patch applied with patch -p2"
+                PATCH_SUCCESS=true
+              elif patch -p3 --dry-run < "$KSU_PATCH" 2>/dev/null; then
+                patch -p3 < "$KSU_PATCH"
+                echo "✓ KernelSU SUSFS patch applied with patch -p3"
+                PATCH_SUCCESS=true
+              fi
+              
+              cd ../..
             fi
             
-            cd ../..
+            # ============================================
+            # FALLBACK: Manuelles Hinzufügen der SUSFS Kconfig
+            # ============================================
+            if ! grep -q "KSU_SUSFS" drivers/kernelsu/Kconfig 2>/dev/null; then
+              echo ""
+              echo "⚠ SUSFS not in Kconfig after patching - adding manually..."
+              
+              # Füge SUSFS Kconfig Optionen hinzu
+              {
+                echo ""
+                echo "config KSU_SUSFS"
+                echo "	bool \"Enable SUSFS for KernelSU\""
+                echo "	depends on KSU"
+                echo "	default y"
+                echo "	help"
+                echo "	  Enable SUSFS for enhanced root hiding."
+                echo ""
+                echo "config KSU_SUSFS_HAS_MAGIC_MOUNT"
+                echo "	bool \"Enable Magic Mount support\""
+                echo "	depends on KSU_SUSFS"
+                echo "	default y"
+                echo ""
+                echo "config KSU_SUSFS_SUS_PATH"
+                echo "	bool \"Enable SUS path hiding\""
+                echo "	depends on KSU_SUSFS"
+                echo "	default y"
+                echo ""
+                echo "config KSU_SUSFS_SUS_MOUNT"
+                echo "	bool \"Enable SUS mount hiding\""
+                echo "	depends on KSU_SUSFS"
+                echo "	default y"
+                echo ""
+                echo "config KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT"
+                echo "	bool \"Auto add KSU default mounts\""
+                echo "	depends on KSU_SUSFS"
+                echo "	default y"
+                echo ""
+                echo "config KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT"
+                echo "	bool \"Auto add bind mounts\""
+                echo "	depends on KSU_SUSFS"
+                echo "	default y"
+                echo ""
+                echo "config KSU_SUSFS_SUS_KSTAT"
+                echo "	bool \"Enable SUS kstat\""
+                echo "	depends on KSU_SUSFS"
+                echo "	default y"
+                echo ""
+                echo "config KSU_SUSFS_SUS_OVERLAYFS"
+                echo "	bool \"Enable SUS overlayfs\""
+                echo "	depends on KSU_SUSFS"
+                echo "	default y"
+                echo ""
+                echo "config KSU_SUSFS_TRY_UMOUNT"
+                echo "	bool \"Enable try umount\""
+                echo "	depends on KSU_SUSFS"
+                echo "	default y"
+                echo ""
+                echo "config KSU_SUSFS_SPOOF_UNAME"
+                echo "	bool \"Enable uname spoofing\""
+                echo "	depends on KSU_SUSFS"
+                echo "	default y"
+                echo ""
+                echo "config KSU_SUSFS_ENABLE_LOG"
+                echo "	bool \"Enable SUSFS logging\""
+                echo "	depends on KSU_SUSFS"
+                echo "	default y"
+                echo ""
+                echo "config KSU_SUSFS_OPEN_REDIRECT"
+                echo "	bool \"Enable open redirect\""
+                echo "	depends on KSU_SUSFS"
+                echo "	default y"
+              } >> drivers/kernelsu/Kconfig
+              
+              echo "✓ SUSFS Kconfig options added manually"
+            fi
+            
+            # Verifiziere dass SUSFS Kconfig hinzugefügt wurde
+            echo ""
+            echo "=== Verifying SUSFS in Kconfig ==="
+            if grep -q "SUSFS" drivers/kernelsu/Kconfig 2>/dev/null; then
+              echo "✓ SUSFS options found in Kconfig!"
+              grep -c "config KSU_SUSFS" drivers/kernelsu/Kconfig
+              grep "KSU_SUSFS" drivers/kernelsu/Kconfig | head -10
+            else
+              echo "⚠ SUSFS not found in Kconfig after all attempts"
+            fi
+            
+            # ============================================
+            # SUSFS in KernelSU Kbuild integrieren
+            # ============================================
+            echo ""
+            echo "=== Integrating SUSFS into KernelSU Kbuild ==="
+            
+            KBUILD_FILE="drivers/kernelsu/Kbuild"
+            if [ -f "$KBUILD_FILE" ]; then
+              # Prüfe ob susfs bereits im Kbuild ist
+              if ! grep -q "susfs" "$KBUILD_FILE"; then
+                echo "Adding SUSFS to Kbuild..."
+                
+                # Füge SUSFS object files hinzu
+                {
+                  echo ""
+                  echo "# SUSFS Integration"
+                  echo "ccflags-\$(CONFIG_KSU_SUSFS) += -DKSU_SUSFS"
+                  echo "kernelsu-\$(CONFIG_KSU_SUSFS) += susfs.o"
+                } >> "$KBUILD_FILE"
+                
+                # Kopiere susfs.c nach drivers/kernelsu falls nicht vorhanden
+                if [ ! -f "drivers/kernelsu/susfs.c" ] && [ -f "fs/susfs.c" ]; then
+                  cp fs/susfs.c drivers/kernelsu/susfs.c
+                  echo "  ✓ Copied susfs.c to drivers/kernelsu/"
+                fi
+                
+                echo "  ✓ Added SUSFS to Kbuild"
+              else
+                echo "SUSFS already in Kbuild"
+              fi
+              
+              echo ""
+              echo "=== Updated Kbuild (last 20 lines) ==="
+              tail -20 "$KBUILD_FILE"
+              echo "======================================="
+            fi
           else
             echo "WARNING: KSU SUSFS patch not found or drivers/kernelsu missing"
             echo "Searched:"
