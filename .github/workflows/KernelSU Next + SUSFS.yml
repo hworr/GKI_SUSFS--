@@ -117,8 +117,10 @@ jobs:
     - name: Apply SUSFS 2.0 (KernelSU Next)
       if: ${{ inputs.ksu_variant == 'kernelsu-next' && inputs.enable_susfs }}
       working-directory: kernel
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
-        git clone https://github.com/sidex15/susfs.git
+        git clone https://x-access-token:${GITHUB_TOKEN}@github.com/sidex15/susfs.git
         patch -p1 < susfs/kernel_patches/susfs-2.0-AIO.patch
 
     # --------------------------------------------------
