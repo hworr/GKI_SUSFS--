@@ -4,35 +4,27 @@ on:
   workflow_dispatch:
     inputs:
       kernelsu_variant:
-        description: 'KernelSU Variante (alle SUSFS-kompatibel)'
+        description: 'KernelSU Variante'
         required: true
         default: 'wild'
         type: choice
-        options:
-          - wild       # Wild KSU - Beste SUSFS Integration
-          - sukisu     # SuKiSu - Fokus auf Hiding
-          - next       # KernelSU Next - Aktiv entwickelt
+        options: [wild, sukisu, next]
       gki_branch:
-        description: 'GKI Branch (Android + Kernel)'
+        description: 'GKI Branch'
         required: true
         default: 'android15-6.6'
         type: choice
         options:
-          - android15-6.6   # Pixel 9/10, neue Geräte
-          - android14-6.1   # Pixel 8, Samsung S24
-          - android14-5.15  # Ältere Android 14 Geräte
-          - android13-5.15  # Android 13 Geräte
-          - android13-5.10  # Ältere Android 13
-          - android12-5.10  # Android 12 Geräte
+          - android15-6.6
+          - android14-6.1
+          - android14-5.15
+          - android13-5.15
+          - android13-5.10
+          - android12-5.10
       enable_susfs:
         description: 'SUSFS aktivieren'
         required: true
         default: true
-        type: boolean
-      build_lkm:
-        description: 'LKM statt GKI bauen (für locked Bootloader)'
-        required: true
-        default: false
         type: boolean
 
 jobs:
@@ -40,433 +32,106 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    
+
     steps:
+# --------------------------------------------------
+# ENV
+# --------------------------------------------------
       - name: Maximize Build Space
         uses: easimon/maximize-build-space@master
-        with:
-          root-reserve-mb: 8192
-          swap-size-mb: 8192
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
 
       - name: Setup Build Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            git ccache automake flex lzop bison gperf build-essential \
-            zip curl zlib1g-dev libxml2-utils bzip2 libbz2-dev \
-            libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush \
-            schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev \
-            pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl \
-            libxml-simple-perl bc libc6-dev-i386 libx11-dev lib32z-dev \
-            libgl1-mesa-dev xsltproc unzip device-tree-compiler python3 \
-            python-is-python3 repo cpio kmod openssl libelf-dev pahole
+          sudo apt-get install -y git ccache build-essential repo bc flex bison \
+            libssl-dev libelf-dev pahole python3 python-is-python3 zip unzip curl
 
-      - name: Set Build Variables
+      - name: Set Variables
         id: vars
         run: |
-          BRANCH="${{ inputs.gki_branch }}"
-          KERNEL_VERSION=$(echo "$BRANCH" | cut -d'-' -f2)
-          
-          echo "BRANCH=${BRANCH}" >> $GITHUB_OUTPUT
-          echo "KERNEL_VERSION=${KERNEL_VERSION}" >> $GITHUB_OUTPUT
-          echo "SUSFS_BRANCH=gki-${BRANCH}" >> $GITHUB_OUTPUT
-          
-          echo "================================"
-          echo "Build Configuration:"
-          echo "  GKI Branch: ${BRANCH}"
-          echo "  Kernel: ${KERNEL_VERSION}"
-          echo "  KSU Variant: ${{ inputs.kernelsu_variant }}"
-          echo "  SUSFS: ${{ inputs.enable_susfs }}"
-          echo "  LKM Mode: ${{ inputs.build_lkm }}"
-          echo "================================"
+          echo "BRANCH=${{ inputs.gki_branch }}" >> $GITHUB_OUTPUT
+          echo "KERNEL_VERSION=$(echo '${{ inputs.gki_branch }}' | cut -d'-' -f2)" >> $GITHUB_OUTPUT
 
+# --------------------------------------------------
+# KERNEL SOURCE
+# --------------------------------------------------
       - name: Download Kernel Source
         run: |
-          cd $GITHUB_WORKSPACE
-          
-          BRANCH="${{ steps.vars.outputs.BRANCH }}"
-          
-          echo "Downloading manifest for ${BRANCH}..."
-          
-          # Manifest URL ermitteln
-          MANIFEST_URL="https://android.googlesource.com/kernel/manifest"
-          
-          mkdir -p kernel_workspace && cd kernel_workspace
-          
-          # Repo init
-          repo init -u $MANIFEST_URL -b common-${BRANCH} --depth=1
-          
-          # Sync
+          mkdir kernel_workspace && cd kernel_workspace
+          repo init -u https://android.googlesource.com/kernel/manifest \
+            -b common-${{ steps.vars.outputs.BRANCH }} --depth=1
           repo sync -c -j$(nproc) --no-tags --no-clone-bundle
 
+# --------------------------------------------------
+# KERNELSU (MANUAL, BAZEL-SAFE)
+# --------------------------------------------------
       - name: Setup KernelSU
         run: |
-          cd $GITHUB_WORKSPACE/kernel_workspace
-          
-          # Kernel Source Verzeichnis finden
-          if [ -d "common" ]; then
-            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/common"
-          elif [ -d "private/gs-google" ]; then
-            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/private/gs-google"
-          elif [ -d "aosp" ]; then
-            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/aosp"
-          else
-            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace"
-          fi
-          
-          echo "Kernel directory: $KERNEL_DIR"
-          
-          # Prüfen ob drivers/ existiert
-          if [ ! -d "$KERNEL_DIR/drivers" ]; then
-            echo "ERROR: drivers/ not found in $KERNEL_DIR"
-            echo "Contents:"
-            ls -la "$KERNEL_DIR"
-            exit 1
-          fi
-          
-          cd "$KERNEL_DIR"
-          
+          set -e
+          cd kernel_workspace/common
+
           VARIANT="${{ inputs.kernelsu_variant }}"
-          
+
           case "$VARIANT" in
-            "wild")
-              echo "Installing Wild KSU..."
-              git clone https://github.com/WildKernels/Wild_KSU.git KernelSU
-              cd KernelSU && git checkout wild && cd ..
-              ;;
-              
-            "sukisu")
-              echo "Installing SuKiSu..."
-              git clone https://github.com/ShirkNeko/SuKiSu.git KernelSU
-              ;;
-              
-            "next")
-              echo "Installing KernelSU Next..."
-              git clone --recurse-submodules https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
-              ;;
+            wild)   git clone https://github.com/WildKernels/Wild_KSU.git KernelSU ;;
+            sukisu) git clone https://github.com/ShirkNeko/SuKiSu.git KernelSU ;;
+            next)   git clone --recurse-submodules https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU ;;
           esac
-          
-          # Version aus Git holen
+
           cd KernelSU
           git fetch --tags
-          KSU_VERSION=$(git describe --abbrev=0 --tags 2>/dev/null || echo "v1.0.0")
-          KSU_VERSION_NUM=$(echo "$KSU_VERSION" | sed 's/v//g' | cut -d'-' -f1)
-          KSU_COMMITS=$(git rev-list --count HEAD 2>/dev/null || echo "1")
-          
-          echo "KernelSU Version: $KSU_VERSION"
-          echo "KernelSU Version Number: $KSU_VERSION_NUM"
-          echo "KernelSU Commits: $KSU_COMMITS"
+          KSU_VERSION=$(git describe --abbrev=0 --tags)
+          KSU_COMMITS=$(git rev-list --count HEAD)
           cd ..
-          
-          # ============================================
-          # Manuelle Integration (ohne setup.sh)
-          # ============================================
-          
-          echo "Integrating KernelSU into kernel..."
-          
-          # Kopiere KernelSU kernel module
+
           rm -rf drivers/kernelsu
           cp -r KernelSU/kernel drivers/kernelsu
-          
-          # Version in Kbuild hardcoden
-          KBUILD_FILE="drivers/kernelsu/Kbuild"
-          if [ -f "$KBUILD_FILE" ]; then
-            echo "Patching Kbuild with version $KSU_VERSION ($KSU_COMMITS commits)..."
-            
-            # Backup
-            cp "$KBUILD_FILE" "$KBUILD_FILE.original"
-            
-            # LÖSUNG: Füge am ANFANG der Datei die Variablen ein
-            # BEVOR die ifeq-Prüfung auf .git läuft!
-            # Das setzt KSU_GIT_VERSION_VALID := 1 was die Fallback-Logik überspringt
-            {
-              echo "# =================================================="
-              echo "# KernelSU Version - Hardcoded by GKI workflow"
-              echo "# This bypasses the .git check which fails in Bazel sandbox"
-              echo "# =================================================="
-              echo "KSU_GIT_VERSION := $KSU_COMMITS"
-              echo "KSU_GIT_TAG := $KSU_VERSION"
-              echo "KSU_GIT_VERSION_VALID := 1"
-              echo ""
-              cat "$KBUILD_FILE"
-            } > "$KBUILD_FILE.new"
-            mv "$KBUILD_FILE.new" "$KBUILD_FILE"
-            
-            echo ""
-            echo "=== Patched Kbuild (first 30 lines) ==="
-            head -30 "$KBUILD_FILE"
-            echo "========================================"
-          fi
-          
-          # ZUSÄTZLICH: ksu.h patchen falls die Version dort definiert ist
-          KSU_H="drivers/kernelsu/ksu.h"
-          if [ -f "$KSU_H" ]; then
-            echo "Patching ksu.h..."
-            sed -i 's/#define KERNEL_SU_VERSION_TAG.*/#define KERNEL_SU_VERSION_TAG "'"$KSU_VERSION"'"/' "$KSU_H" || true
-          fi
-          
-          # Makefile in drivers/Makefile hinzufügen
-          if ! grep -q "kernelsu" drivers/Makefile; then
-            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
-            echo "Added kernelsu to drivers/Makefile"
-          fi
-          
-          # Kconfig in drivers/Kconfig hinzufügen
-          if ! grep -q "kernelsu/Kconfig" drivers/Kconfig; then
-            sed -i '/^endmenu$/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-            echo "Added kernelsu to drivers/Kconfig"
-          fi
-          
-          # ============================================
-          # CONFIG_KSU in defconfig aktivieren
-          # ============================================
-          echo ""
-          echo "=== Enabling CONFIG_KSU in defconfig ==="
-          
-          # Finde gki_defconfig
-          GKI_DEFCONFIG=""
-          for config in "arch/arm64/configs/gki_defconfig" \
-                        "../build/build.config.gki.aarch64"; do
-            if [ -f "$config" ]; then
-              GKI_DEFCONFIG="$config"
-              break
-            fi
-          done
-          
-          if [ -n "$GKI_DEFCONFIG" ]; then
-            if ! grep -q "CONFIG_KSU=y" "$GKI_DEFCONFIG"; then
-              echo "CONFIG_KSU=y" >> "$GKI_DEFCONFIG"
-              echo "✓ Added CONFIG_KSU=y to $GKI_DEFCONFIG"
-            else
-              echo "CONFIG_KSU=y already present in $GKI_DEFCONFIG"
-            fi
-          else
-            echo "Creating gki_defconfig fragment..."
-            mkdir -p arch/arm64/configs
-            echo "CONFIG_KSU=y" > arch/arm64/configs/ksu.config
-          fi
-          
-          # Zeige KernelSU Kconfig für Debugging
-          echo ""
-          echo "=== KernelSU Kconfig ==="
-          if [ -f "drivers/kernelsu/Kconfig" ]; then
-            cat drivers/kernelsu/Kconfig
-          else
-            echo "WARNING: drivers/kernelsu/Kconfig not found!"
-          fi
-          echo "========================"
-          
-          # Verify
-          echo ""
-          echo "============================================"
-          echo "KernelSU Installation Summary:"
-          echo "  Variant: $VARIANT"
-          echo "  Version: $KSU_VERSION"
-          echo "  Commits: $KSU_COMMITS"
-          echo "  Kernel Dir: $KERNEL_DIR"
-          echo "  drivers/kernelsu: $([ -d drivers/kernelsu ] && echo 'EXISTS' || echo 'MISSING')"
-          echo "============================================"
-          
-          # Check
-          if [ ! -d "drivers/kernelsu" ]; then
-            echo "ERROR: KernelSU integration failed!"
-            exit 1
-          fi
-          
-          grep -q "kernelsu" drivers/Makefile || { echo "ERROR: Makefile not patched"; exit 1; }
-          
-          echo "✓ KernelSU setup complete"
 
+          # Bazel-fester Version Inject (kein .git nötig)
+          KBUILD=drivers/kernelsu/Kbuild
+          {
+            echo "KSU_GIT_VERSION := $KSU_COMMITS"
+            echo "KSU_GIT_TAG := $KSU_VERSION"
+            echo "KSU_GIT_VERSION_VALID := 1"
+            echo ""
+            cat "$KBUILD"
+          } > "$KBUILD.new"
+          mv "$KBUILD.new" "$KBUILD"
+
+          grep -q kernelsu drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+          grep -q kernelsu/Kconfig drivers/Kconfig || \
+            sed -i '/^endmenu$/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+
+# --------------------------------------------------
+# SUSFS
+# --------------------------------------------------
       - name: Setup SUSFS
         if: inputs.enable_susfs
         run: |
           set -e
+          cd kernel_workspace
+          git clone --depth=1 https://github.com/WildKernels/susfs4ksu.git susfs
 
-          cd $GITHUB_WORKSPACE/kernel_workspace
+          cd common
+          cp ../susfs/kernel_patches/fs/susfs.c fs/
+          cp ../susfs/kernel_patches/include/linux/susfs.h include/linux/
 
-          # Kernel Dir ermitteln
-          if [ -d "common" ]; then
-            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/common"
-          elif [ -d "private/gs-google" ]; then
-            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/private/gs-google"
-          elif [ -d "aosp" ]; then
-            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/aosp"
-          else
-            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace"
-          fi
+          PATCH=../susfs/kernel_patches/50_add_susfs_in_gki-${{ steps.vars.outputs.BRANCH }}.patch
+          patch -p1 < "$PATCH" || true
+          rm -f fs/proc/base.c.rej || true
 
-          SUSFS_BRANCH="${{ steps.vars.outputs.SUSFS_BRANCH }}"
-          BRANCH="${{ steps.vars.outputs.BRANCH }}"
+          cd drivers/kernelsu
+          patch -p1 < ../../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+          cd ../..
 
-          echo "============================================"
-          echo "SUSFS Setup"
-          echo "  Branch: ${SUSFS_BRANCH}"
-          echo "  Kernel Dir: ${KERNEL_DIR}"
-          echo "============================================"
-
-          # --------------------------------------------------
-          # Clone SUSFS
-          # --------------------------------------------------
-          echo "Cloning SUSFS..."
-          rm -rf susfs
-          git clone --depth=1 -b "${SUSFS_BRANCH}" \
-          https://github.com/WildKernels/susfs4ksu.git susfs
-          echo "✓ SUSFS cloned"
-
-          cd "$KERNEL_DIR"
-
-          SUSFS_SRC="$GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches"
-
-          # --------------------------------------------------
-          # Step 1: Copy SUSFS source files
-          # --------------------------------------------------
-          echo "=== Step 1: Copying SUSFS sources ==="
-          cp "${SUSFS_SRC}/fs/susfs.c" fs/susfs.c
-          cp "${SUSFS_SRC}/include/linux/susfs.h" include/linux/susfs.h
-          echo "✓ susfs.c / susfs.h copied"
-
-          # --------------------------------------------------
-          # Step 2: Apply kernel SUSFS patch (6.6 safe)
-          # --------------------------------------------------
-          echo "=== Step 2: Applying kernel SUSFS patch ==="
-
-          PATCH="${SUSFS_SRC}/50_add_susfs_in_gki-${BRANCH}.patch"
-
-          if [ ! -f "$PATCH" ]; then
-            echo "❌ SUSFS patch not found: $PATCH"
-            exit 1
-          fi
-
-          PATCH_APPLIED=false
-
-          # Erst prüfen, dann anwenden
-          if git apply --check "$PATCH" 2>/dev/null; then
-            git apply "$PATCH"
-            PATCH_APPLIED=true
-            echo "✓ Kernel SUSFS patch applied (git apply)"
-          else
-            echo "⚠ git apply failed, using patch -p1 with fuzz"
-            patch -p1 < "$PATCH" || true
-            PATCH_APPLIED=true
-          fi
-
-          # --------------------------------------------------
-          # 6.6 FIX: fs/proc/base.c Drift bewusst ignorieren
-          # --------------------------------------------------
-          if [ -f fs/proc/base.c.rej ]; then
-            echo "⚠ Known 6.6 drift: fs/proc/base.c patch rejected (expected)"
-            rm -f fs/proc/base.c.rej
-          fi
-
-          if [ "$PATCH_APPLIED" != "true" ]; then
-            echo "❌ SUSFS kernel patch could not be applied"
-            exit 1
-          fi
-
-          # --------------------------------------------------
-          # Step 3: KernelSU ↔ SUSFS integration
-          # --------------------------------------------------
-          echo "=== Step 3: KernelSU SUSFS integration ==="
-
-          KSU_PATCH="${SUSFS_SRC}/KernelSU/10_enable_susfs_for_ksu.patch"
-
-          if [ -f "$KSU_PATCH" ] && [ -d "drivers/kernelsu" ]; then
-            cd drivers/kernelsu
-            if git apply --check "$KSU_PATCH" 2>/dev/null; then
-              git apply "$KSU_PATCH"
-              echo "✓ KernelSU SUSFS patch applied"
-            else
-              patch -p1 < "$KSU_PATCH" || true
-              echo "✓ KernelSU SUSFS patch applied (fallback)"
-            fi
-            cd ../..
-          else
-            echo "⚠ KernelSU SUSFS patch not found or KernelSU missing"
-          fi
-
-          # --------------------------------------------------
-          # Verification
-          # --------------------------------------------------
-          echo "============================================"
-          echo "SUSFS Verification"
-          echo "--------------------------------------------"
-          test -f fs/susfs.c && echo "✓ fs/susfs.c present"
-          test -f include/linux/susfs.h && echo "✓ susfs.h present"
-          grep -rq susfs fs && echo "✓ Kernel SUSFS hooks present"
-          grep -rq susfs drivers/kernelsu && echo "✓ KernelSU SUSFS hooks present"
-          echo "============================================"
-          echo "✓ SUSFS setup complete"
-      - name: Apply Additional Patches
+# --------------------------------------------------
+# CONFIG (FRAGMENT ONLY – GKI SAFE)
+# --------------------------------------------------
+      - name: Create gki_defconfig.fragment
         if: inputs.enable_susfs
         run: |
-          cd $GITHUB_WORKSPACE/kernel_workspace
-          
-          # Kernel Source Verzeichnis finden
-          if [ -d "common" ]; then
-            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/common"
-          elif [ -d "private/gs-google" ]; then
-            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/private/gs-google"
-          elif [ -d "aosp" ]; then
-            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/aosp"
-          else
-            KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace"
-          fi
-          
-          cd "$KERNEL_DIR"
-          
-          SUSFS_SRC="$GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches"
-          
-          echo "=== Applying additional patches ==="
-          
-          # 1. Hide stuff patch (Anti-Detection)
-          if [ -f "$SUSFS_SRC/hide_stuff.patch" ]; then
-            echo "Applying hide_stuff.patch..."
-            git apply "$SUSFS_SRC/hide_stuff.patch" 2>/dev/null || \
-            patch -p1 < "$SUSFS_SRC/hide_stuff.patch" 2>/dev/null || \
-            echo "  (may already be applied)"
-          fi
-          
-          # 2. Erstelle/Update gki_defconfig für SUSFS
-          echo ""
-          echo "=== Configuring kernel for SUSFS ==="
-          
-          # Finde alle möglichen defconfig Orte
-          for defconfig in "arch/arm64/configs/gki_defconfig" \
-                          "common/arch/arm64/configs/gki_defconfig"; do
-            if [ -f "$defconfig" ]; then
-              echo "Found defconfig: $defconfig"
-              
-              # Füge KSU und SUSFS Optionen hinzu
-              {
-                grep -q "CONFIG_KSU=y" "$defconfig" || echo "CONFIG_KSU=y"
-                grep -q "CONFIG_KSU_SUSFS=y" "$defconfig" || echo "CONFIG_KSU_SUSFS=y"
-                grep -q "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y"
-                grep -q "CONFIG_KSU_SUSFS_SUS_PATH=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
-                grep -q "CONFIG_KSU_SUSFS_SUS_MOUNT=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
-                grep -q "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y"
-                grep -q "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y"
-                grep -q "CONFIG_KSU_SUSFS_SUS_KSTAT=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
-                grep -q "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y"
-                grep -q "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y"
-                grep -q "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
-                grep -q "CONFIG_KSU_SUSFS_ENABLE_LOG=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y"
-                grep -q "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
-              } >> "$defconfig"
-              
-              echo "✓ Updated $defconfig with SUSFS options"
-            fi
-          done
-          
-          # 3. Für Bazel: Erstelle config fragment
-          if [ -d "common" ]; then
-            FRAGMENT="common/arch/arm64/configs/gki_defconfig.fragment"
-            mkdir -p "$(dirname "$FRAGMENT")"
-            cat > "$FRAGMENT" << 'EOF'
-          # KernelSU + SUSFS Configuration
+          mkdir -p common/arch/arm64/configs
+          cat > common/arch/arm64/configs/gki_defconfig.fragment << 'EOF'
           CONFIG_KSU=y
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
@@ -481,155 +146,25 @@ jobs:
           CONFIG_KSU_SUSFS_ENABLE_LOG=y
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           EOF
-            echo "✓ Created config fragment: $FRAGMENT"
-          fi
-          
-          echo ""
-          echo "=== Additional patches complete ==="
 
+# --------------------------------------------------
+# BUILD
+# --------------------------------------------------
       - name: Build Kernel
         run: |
-          cd $GITHUB_WORKSPACE/kernel_workspace
-          
-          # LTO=thin für schnelleren Build und weniger RAM
-          export LTO=thin
-          
-          echo "Starting kernel build..."
-          echo "This may take 30-60 minutes..."
-          
-          # Zeige aktuelle Konfiguration
-          echo ""
-          echo "=== Build Configuration ==="
-          if [ -f "common/arch/arm64/configs/gki_defconfig" ]; then
-            echo "KSU/SUSFS options in defconfig:"
-            grep -E "CONFIG_KSU|CONFIG_SUSFS" common/arch/arm64/configs/gki_defconfig 2>/dev/null || echo "(none found)"
-          fi
-          echo "============================"
-          echo ""
-          
-          # Build mit Bazel (neuer Weg für GKI)
-          if [ -f "build/build.sh" ]; then
-            # Legacy build
-            BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
-          elif [ -f "build/kernel/build.sh" ]; then
-            # Newer build
-            BUILD_CONFIG=common/build.config.gki.aarch64 build/kernel/build.sh
-          else
-            # Bazel build (neuester Weg)
-            tools/bazel run //common:kernel_aarch64_dist -- --dist_dir=dist
-          fi
-          
-          # Nach dem Build: Prüfe ob SUSFS kompiliert wurde
-          echo ""
-          echo "=== Post-Build Verification ==="
-          if [ -f "out/common/fs/susfs.o" ] || find . -name "susfs.o" -type f 2>/dev/null | head -1; then
-            echo "✓ SUSFS module compiled (susfs.o found)"
-          else
-            echo "⚠ SUSFS module may not have been compiled"
-          fi
-          echo "==============================="
+          cd kernel_workspace
+          tools/bazel run //common:kernel_aarch64_dist -- --dist_dir=dist
 
-      - name: Prepare Output
-        id: output
+# --------------------------------------------------
+# OUTPUT
+# --------------------------------------------------
+      - name: Package Kernel
         run: |
-          cd $GITHUB_WORKSPACE/kernel_workspace
-          
-          mkdir -p $GITHUB_WORKSPACE/output
-          
-          # Kernel Image finden
-          KERNEL_IMAGE=$(find . -name "Image" -type f | head -1)
-          KERNEL_IMAGE_GZ=$(find . -name "Image.gz" -type f | head -1)
-          KERNEL_IMAGE_LZ4=$(find . -name "Image.lz4" -type f | head -1)
-          
-          if [ -n "$KERNEL_IMAGE" ]; then
-            cp "$KERNEL_IMAGE" $GITHUB_WORKSPACE/output/
-            echo "Found: Image"
-          fi
-          
-          if [ -n "$KERNEL_IMAGE_GZ" ]; then
-            cp "$KERNEL_IMAGE_GZ" $GITHUB_WORKSPACE/output/
-            echo "Found: Image.gz"
-          fi
-          
-          if [ -n "$KERNEL_IMAGE_LZ4" ]; then
-            cp "$KERNEL_IMAGE_LZ4" $GITHUB_WORKSPACE/output/
-            echo "Found: Image.lz4"
-          fi
-          
-          # AnyKernel3 erstellen
-          cd $GITHUB_WORKSPACE
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
-          
-          cd AnyKernel3
-          rm -rf .git README.md
-          
-          # Anpassen
-          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
-          sed -i 's/is_slot_device=0/is_slot_device=auto/g' anykernel.sh
-          
-          # Kernel kopieren
-          if [ -f "$GITHUB_WORKSPACE/output/Image" ]; then
-            cp $GITHUB_WORKSPACE/output/Image .
-          elif [ -f "$GITHUB_WORKSPACE/output/Image.gz" ]; then
-            cp $GITHUB_WORKSPACE/output/Image.gz .
-          elif [ -f "$GITHUB_WORKSPACE/output/Image.lz4" ]; then
-            cp $GITHUB_WORKSPACE/output/Image.lz4 .
-          fi
-          
-          # ZIP Name
-          VARIANT="${{ inputs.kernelsu_variant }}"
-          BRANCH="${{ steps.vars.outputs.BRANCH }}"
-          DATE=$(date +%Y%m%d)
-          
-          SUSFS_TAG=""
-          if [ "${{ inputs.enable_susfs }}" == "true" ]; then
-            SUSFS_TAG="-SUSFS"
-          fi
-          
-          ZIP_NAME="GKI-${BRANCH}-${VARIANT}${SUSFS_TAG}-${DATE}.zip"
-          
-          zip -r9 "$GITHUB_WORKSPACE/output/${ZIP_NAME}" *
-          
-          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_OUTPUT
-          echo "✓ Created: ${ZIP_NAME}"
+          mkdir output
+          find kernel_workspace -name Image -exec cp {} output/ \;
 
-      - name: Upload Artifacts
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-${{ steps.vars.outputs.BRANCH }}-${{ inputs.kernelsu_variant }}
-          path: |
-            ${{ github.workspace }}/output/*
-          if-no-files-found: error
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ github.run_number }}-${{ steps.vars.outputs.BRANCH }}
-          name: "GKI ${{ steps.vars.outputs.BRANCH }} - ${{ inputs.kernelsu_variant }}${{ inputs.enable_susfs && ' + SUSFS' || '' }}"
-          body: |
-            ## GKI Kernel Build
-            
-            | Setting | Value |
-            |---------|-------|
-            | **KernelSU** | ${{ inputs.kernelsu_variant }} |
-            | **Branch** | ${{ steps.vars.outputs.BRANCH }} |
-            | **SUSFS** | ${{ inputs.enable_susfs && '✓ Enabled' || '✗ Disabled' }} |
-            | **LKM Mode** | ${{ inputs.build_lkm && '✓ Yes' || '✗ No (GKI)' }} |
-            | **Build** | #${{ github.run_number }} |
-            
-            ### Installation
-            1. Flash via KernelFlasher oder AnyKernel3
-            2. Oder: `fastboot flash boot` mit gepatchtem boot.img
-            
-            ### Manager Apps
-            - Wild KSU: https://github.com/WildKernels/Wild_KSU
-            - KernelSU Next: https://github.com/KernelSU-Next/KernelSU-Next
-            - SuKiSu: https://github.com/ShirkNeko/SuKiSu
-            
-            ### SUSFS Module (falls SUSFS aktiviert)
-            - https://github.com/sidex15/ksu_module_susfs
-          files: ${{ github.workspace }}/output/${{ steps.output.outputs.ZIP_NAME }}
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: kernel-${{ inputs.kernelsu_variant }}
+          path: output/*
