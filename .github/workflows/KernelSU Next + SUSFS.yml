@@ -147,86 +147,25 @@ jobs:
     # --------------------------------------------------
     # SUSFS 2.0 (KernelSU Next)
     # --------------------------------------------------
-    - name: Apply SUSFS 2.0 patch for KernelSU Next
+    - name: Patch KernelSU Next with SUSFS
       if: ${{ inputs.ksu_variant == 'kernelsu-next' && inputs.enable_susfs }}
-      working-directory: kernel
       run: |
-            set -e
-        
-            echo "Downloading SUSFS 2.0 AIO patch (Next-3.0.0)"
-            curl -fL \
-              https://raw.githubusercontent.com/WildKernels/kernel_patches/main/wild/susfs_fix_patches/v2.0.0/Next-3.0.0-susfs-2.0.0-AIO.patch \
-              -o susfs-2.0-AIO.patch
-        
-            echo "Verify patch file"
-            wc -l susfs-2.0-AIO.patch
-            head -n 20 susfs-2.0-AIO.patch
-        
-            echo "Applying SUSFS patch"
-            patch -p1 < susfs-2.0-AIO.patch
-            
-            # 2. Kernel patches anwenden
-            echo "Applying SUSFS kernel patches for ${KV}..."
-            
-            PATCH_DIR="${SUSFS_SRC}/50_add_susfs_in_${KV}"
-            
-            if [ -d "$PATCH_DIR" ]; then
-              for patch in "$PATCH_DIR"/*.patch; do
-                if [ -f "$patch" ]; then
-                  echo "Applying: $(basename $patch)"
-                  git apply --check "$patch" 2>/dev/null && git apply "$patch" || \
-                  patch -p1 --forward < "$patch" || \
-                  echo "  (may already be applied)"
-                fi
-              done
-            else
-              echo "WARNING: No patches found in: $PATCH_DIR"
-              echo "Available directories:"
-              ls -la "${SUSFS_SRC}/" 2>/dev/null || true
-            fi
-            
-            # 3. KernelSU SUSFS Integration Patch
-            echo "Applying KernelSU SUSFS integration patch..."
-            
-            KSU_PATCH="${SUSFS_SRC}/KernelSU/10_enable_susfs_for_ksu.patch"
-            
-            if [ -f "$KSU_PATCH" ] && [ -d "drivers/kernelsu" ]; then
-              cd drivers/kernelsu
-              echo "Patching KernelSU for SUSFS support..."
-              git apply --check "$KSU_PATCH" 2>/dev/null && git apply "$KSU_PATCH" || \
-              patch -p1 --forward < "$KSU_PATCH" || \
-              echo "  (may already be applied)"
-              cd ../..
-            fi
-            
-            echo "✓ SUSFS setup complete"
-    - name: Apply Additional Patches
-      if: inputs.enable_susfs
-      run: |
-            cd $GITHUB_WORKSPACE/kernel_workspace
-            
-            # Kernel Source Verzeichnis finden
-            if [ -d "common" ]; then
-              KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/common"
-            elif [ -d "private/gs-google" ]; then
-              KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/private/gs-google"
-            elif [ -d "aosp" ]; then
-              KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/aosp"
-            else
-              KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace"
-            fi
-            
-            cd "$KERNEL_DIR"
-            
-            # Verstecke KernelSU Symbole (Anti-Detection)
-            echo "Applying anti-detection patches..."
-            
-            SUSFS_SRC="$GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches"
-            
-            if [ -f "$SUSFS_SRC/hide_stuff.patch" ]; then
-              git apply "$SUSFS_SRC/hide_stuff.patch" || echo "hide_stuff.patch may already be applied"
-            fi
-
+        set -e
+    
+        echo "Cloning KernelSU Next"
+        git clone https://github.com/KernelSU-Next/KernelSU-Next.git kernelsu-next
+        cd kernelsu-next
+    
+        echo "Downloading SUSFS 2.0 AIO patch for KernelSU Next"
+        curl -fL \
+          https://raw.githubusercontent.com/WildKernels/kernel_patches/main/wild/susfs_fix_patches/v2.0.0/Next-3.0.0-susfs-2.0.0-AIO.patch \
+          -o susfs.patch
+    
+        echo "Applying SUSFS patch to KernelSU Next source"
+        patch -p1 < susfs.patch
+    
+        echo "Integrating KernelSU Next into kernel tree"
+        bash kernel/setup.sh ../kernel
     # --------------------------------------------------
     # DEFCONFIG
     # --------------------------------------------------
