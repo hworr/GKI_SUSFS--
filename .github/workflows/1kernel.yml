@@ -1,4 +1,4 @@
-name: 1 Kernelsu Kernel + SUSFS
+name: Build GKI Kernel + SUSFS
 
 on:
   workflow_dispatch:
@@ -363,51 +363,55 @@ jobs:
           echo ""
           echo "=== Step 2: Applying SUSFS kernel patches ==="
           
-          # Finde das richtige Patch-Verzeichnis
-          PATCH_DIR=""
-          for dir in "${SUSFS_SRC}/50_add_susfs_in_${KV}" \
-                     "${SUSFS_SRC}/50_add_susfs_in_gki-${KV}" \
-                     "$GITHUB_WORKSPACE/kernel_workspace/susfs/patches/${KV}"; do
-            if [ -d "$dir" ]; then
-              PATCH_DIR="$dir"
-              break
-            fi
-          done
+          # Der Patch kann entweder ein Verzeichnis mit mehreren Patches sein
+          # ODER eine einzelne .patch Datei
+          PATCH_APPLIED=false
           
-          if [ -n "$PATCH_DIR" ] && [ -d "$PATCH_DIR" ]; then
-            echo "Found patch directory: $PATCH_DIR"
-            echo "Patches:"
-            ls -la "$PATCH_DIR"/*.patch 2>/dev/null || echo "No .patch files"
+          # Methode 1: Einzelne Patch-Datei (neues Format)
+          SINGLE_PATCH="${SUSFS_SRC}/50_add_susfs_in_gki-${{ steps.vars.outputs.BRANCH }}.patch"
+          if [ -f "$SINGLE_PATCH" ]; then
+            echo "Found single patch file: $SINGLE_PATCH"
+            echo "Applying patch..."
             
-            for patch in "$PATCH_DIR"/*.patch; do
-              if [ -f "$patch" ]; then
-                PATCH_NAME=$(basename "$patch")
-                echo ""
-                echo "Applying: $PATCH_NAME"
-                
-                # Versuche verschiedene Methoden
-                if git apply --check "$patch" 2>/dev/null; then
-                  git apply "$patch"
-                  echo "  ✓ Applied with git apply"
-                elif patch -p1 --dry-run < "$patch" 2>/dev/null; then
-                  patch -p1 < "$patch"
-                  echo "  ✓ Applied with patch -p1"
-                else
-                  echo "  ⚠ Could not apply (may already be applied or conflicts)"
-                  # Zeige die ersten Zeilen des Patches für Debugging
-                  echo "  Patch preview:"
-                  head -20 "$patch" | sed 's/^/    /'
-                fi
+            if git apply --check "$SINGLE_PATCH" 2>/dev/null; then
+              git apply "$SINGLE_PATCH"
+              echo "✓ Kernel SUSFS patch applied with git apply"
+              PATCH_APPLIED=true
+            elif patch -p1 --dry-run < "$SINGLE_PATCH" 2>/dev/null; then
+              patch -p1 < "$SINGLE_PATCH"
+              echo "✓ Kernel SUSFS patch applied with patch -p1"
+              PATCH_APPLIED=true
+            else
+              echo "⚠ Patch check failed, trying to apply anyway..."
+              git apply "$SINGLE_PATCH" 2>&1 || patch -p1 < "$SINGLE_PATCH" 2>&1 || true
+            fi
+          fi
+          
+          # Methode 2: Verzeichnis mit mehreren Patches (altes Format)
+          if [ "$PATCH_APPLIED" = false ]; then
+            for dir in "${SUSFS_SRC}/50_add_susfs_in_${KV}" \
+                       "${SUSFS_SRC}/50_add_susfs_in_gki-${KV}"; do
+              if [ -d "$dir" ]; then
+                echo "Found patch directory: $dir"
+                for patch in "$dir"/*.patch; do
+                  if [ -f "$patch" ]; then
+                    PATCH_NAME=$(basename "$patch")
+                    echo "Applying: $PATCH_NAME"
+                    git apply "$patch" 2>/dev/null || patch -p1 < "$patch" 2>/dev/null || echo "  (may already be applied)"
+                  fi
+                done
+                PATCH_APPLIED=true
+                break
               fi
             done
-          else
-            echo "WARNING: No patch directory found for kernel ${KV}"
-            echo "Searched locations:"
-            echo "  - ${SUSFS_SRC}/50_add_susfs_in_${KV}"
-            echo "  - ${SUSFS_SRC}/50_add_susfs_in_gki-${KV}"
-            echo ""
-            echo "Available directories in kernel_patches:"
-            ls -la "${SUSFS_SRC}/" 2>/dev/null | grep "^d" || echo "None"
+          fi
+          
+          if [ "$PATCH_APPLIED" = false ]; then
+            echo "WARNING: No SUSFS kernel patches found!"
+            echo "Searched:"
+            echo "  - ${SUSFS_SRC}/50_add_susfs_in_gki-${{ steps.vars.outputs.BRANCH }}.patch"
+            echo "  - ${SUSFS_SRC}/50_add_susfs_in_${KV}/"
+            ls -la "${SUSFS_SRC}/"
           fi
           
           # ============================================
@@ -506,10 +510,34 @@ jobs:
           echo "  include/linux/susfs.h: $([ -f include/linux/susfs.h ] && echo '✓ EXISTS' || echo '✗ MISSING')"
           
           # Prüfe ob SUSFS in KernelSU integriert ist
-          if grep -q "susfs" drivers/kernelsu/*.c 2>/dev/null; then
-            echo "  KernelSU SUSFS integration: ✓ FOUND"
+          echo ""
+          echo "  Checking KernelSU SUSFS integration..."
+          if grep -rq "susfs" drivers/kernelsu/ 2>/dev/null; then
+            echo "  KernelSU SUSFS references: ✓ FOUND"
+            grep -r "susfs" drivers/kernelsu/ 2>/dev/null | head -5 | sed 's/^/    /'
           else
-            echo "  KernelSU SUSFS integration: ⚠ NOT FOUND"
+            echo "  KernelSU SUSFS references: ⚠ NOT FOUND"
+          fi
+          
+          # Prüfe ob Kernel SUSFS Hooks integriert sind
+          echo ""
+          echo "  Checking kernel SUSFS hooks..."
+          if grep -rq "susfs" fs/ 2>/dev/null; then
+            echo "  Kernel fs/ SUSFS: ✓ FOUND"
+          else
+            echo "  Kernel fs/ SUSFS: ⚠ NOT FOUND (kernel patch may not be applied)"
+          fi
+          
+          # Zeige KernelSU Kconfig SUSFS Optionen
+          echo ""
+          echo "  Checking Kconfig for SUSFS options..."
+          if [ -f "drivers/kernelsu/Kconfig" ]; then
+            if grep -q "SUSFS" drivers/kernelsu/Kconfig; then
+              echo "  KernelSU Kconfig SUSFS: ✓ FOUND"
+              grep "SUSFS" drivers/kernelsu/Kconfig | head -5 | sed 's/^/    /'
+            else
+              echo "  KernelSU Kconfig SUSFS: ⚠ NOT FOUND"
+            fi
           fi
           
           echo "============================================"
@@ -581,21 +609,21 @@ jobs:
             FRAGMENT="common/arch/arm64/configs/gki_defconfig.fragment"
             mkdir -p "$(dirname "$FRAGMENT")"
             cat > "$FRAGMENT" << 'EOF'
-          # KernelSU + SUSFS Configuration
-          CONFIG_KSU=y
-          CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=y
-          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          EOF
+# KernelSU + SUSFS Configuration
+CONFIG_KSU=y
+CONFIG_KSU_SUSFS=y
+CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+CONFIG_KSU_SUSFS_SUS_PATH=y
+CONFIG_KSU_SUSFS_SUS_MOUNT=y
+CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+CONFIG_KSU_SUSFS_SUS_KSTAT=y
+CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
+CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+CONFIG_KSU_SUSFS_ENABLE_LOG=y
+CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+EOF
             echo "✓ Created config fragment: $FRAGMENT"
           fi
           
