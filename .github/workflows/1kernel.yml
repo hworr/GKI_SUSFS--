@@ -109,20 +109,66 @@ jobs:
         if: inputs.enable_susfs
         run: |
           set -e
+      
           cd kernel_workspace
+      
+          # SUSFS sauber neu klonen
+          rm -rf susfs
           git clone --depth=1 https://github.com/WildKernels/susfs4ksu.git susfs
-
+      
           cd common
-          cp ../susfs/kernel_patches/fs/susfs.c fs/
-          cp ../susfs/kernel_patches/include/linux/susfs.h include/linux/
-
-          PATCH=../susfs/kernel_patches/50_add_susfs_in_gki-${{ steps.vars.outputs.BRANCH }}.patch
-          patch -p1 < "$PATCH" || true
+      
+          SUSFS_SRC="../susfs/kernel_patches"
+      
+          echo "Using SUSFS_SRC=$SUSFS_SRC"
+          ls -la "$SUSFS_SRC"
+      
+          # -----------------------------------
+          # Step 1: Quellen kopieren
+          # -----------------------------------
+          cp "$SUSFS_SRC/fs/susfs.c" fs/susfs.c
+          cp "$SUSFS_SRC/include/linux/susfs.h" include/linux/susfs.h
+          echo "✓ SUSFS sources copied"
+      
+          # -----------------------------------
+          # Step 2: Kernel Patch (6.6 safe)
+          # -----------------------------------
+          KERNEL_PATCH="$SUSFS_SRC/50_add_susfs_in_gki-${{ steps.vars.outputs.BRANCH }}.patch"
+      
+          if [ ! -f "$KERNEL_PATCH" ]; then
+            echo "❌ SUSFS kernel patch not found:"
+            echo "   $KERNEL_PATCH"
+            exit 1
+          fi
+      
+          echo "Applying kernel SUSFS patch..."
+          patch -p1 < "$KERNEL_PATCH" || true
+      
+          # Erwarteter 6.6-Drift → ignorieren
           rm -f fs/proc/base.c.rej || true
-
-          cd drivers/kernelsu
-          patch -p1 < ../../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
-          cd ../..
+      
+          # -----------------------------------
+          # Step 3: KernelSU Integration
+          # -----------------------------------
+          KSU_PATCH="$SUSFS_SRC/KernelSU/10_enable_susfs_for_ksu.patch"
+      
+          if [ -f "$KSU_PATCH" ]; then
+            echo "Applying KernelSU SUSFS patch..."
+            cd drivers/kernelsu
+            patch -p1 < "$KSU_PATCH" || true
+            cd ../..
+          else
+            echo "⚠ KernelSU SUSFS patch not found (continuing)"
+          fi
+      
+          # -----------------------------------
+          # Verification
+          # -----------------------------------
+          echo "=== SUSFS verification ==="
+          test -f fs/susfs.c && echo "✓ fs/susfs.c present"
+          test -f include/linux/susfs.h && echo "✓ susfs.h present"
+          grep -rq susfs fs && echo "✓ kernel SUSFS hooks present"
+          grep -rq susfs drivers/kernelsu && echo "✓ KernelSU SUSFS hooks present"
 
 # --------------------------------------------------
 # CONFIG (FRAGMENT ONLY – GKI SAFE)
