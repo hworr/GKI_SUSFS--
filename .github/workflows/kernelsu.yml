@@ -1423,7 +1423,7 @@ jobs:
             SUSFS_TAG="-SUSFS"
           fi
           
-          ZIP_NAME="GKI-${BRANCH}-${VARIANT}${SUSFS_TAG}-${DATE}.zip"
+          ZIP_NAME="GKI-${BRANCH}-${VARIANT}-${{ steps.release_vars.outputs.SUSFS_TAG }}-${DATE}.zip"
           
           zip -r9 "$GITHUB_WORKSPACE/output/${ZIP_NAME}" *
           
@@ -1438,11 +1438,28 @@ jobs:
             ${{ github.workspace }}/output/*
           if-no-files-found: error
 
+      - name: Prepare Release Variables
+        id: release_vars
+        run: |
+          if [ "${{ inputs.enable_susfs }}" = "true" ]; then
+            echo "SUSFS_TEXT=✓ Enabled" >> $GITHUB_OUTPUT
+            echo "SUSFS_TAG=+ SUSFS" >> $GITHUB_OUTPUT
+          else
+            echo "SUSFS_TEXT=✗ Disabled" >> $GITHUB_OUTPUT
+            echo "SUSFS_TAG=" >> $GITHUB_OUTPUT
+          fi
+
+          if [ "${{ inputs.build_lkm }}" = "true" ]; then
+            echo "LKM_TEXT=✓ Yes" >> $GITHUB_OUTPUT
+          else
+            echo "LKM_TEXT=✗ No (GKI)" >> $GITHUB_OUTPUT
+          fi
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}-${{ steps.vars.outputs.BRANCH }}
-          name: "GKI ${{ steps.vars.outputs.BRANCH }} - ${{ inputs.kernelsu_variant }}${{ inputs.enable_susfs && ' + SUSFS' || '' }}"
+          name: "GKI ${{ steps.vars.outputs.BRANCH }} - ${{ inputs.kernelsu_variant }} ${{ steps.release_vars.outputs.SUSFS_TAG }}"
           body: |
             ## GKI Kernel Build
             
@@ -1450,8 +1467,8 @@ jobs:
             |---------|-------|
             | **KernelSU** | ${{ inputs.kernelsu_variant }} |
             | **Branch** | ${{ steps.vars.outputs.BRANCH }} |
-            | **SUSFS** | ${{ inputs.enable_susfs && '✓ Enabled' || '✗ Disabled' }} |
-            | **LKM Mode** | ${{ inputs.build_lkm && '✓ Yes' || '✗ No (GKI)' }} |
+            | **SUSFS** | ${{ steps.release_vars.outputs.SUSFS_TEXT }} |
+            | **LKM Mode** | ${{ steps.release_vars.outputs.LKM_TEXT }} |
             | **Build** | #${{ github.run_number }} |
             
             ### Installation
