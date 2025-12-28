@@ -168,6 +168,7 @@ jobs:
           
       - name: Setup KernelSU
         run: |
+          set -e
           cd $GITHUB_WORKSPACE/kernel_workspace
           
           # Kernel Source Verzeichnis finden
@@ -186,20 +187,33 @@ jobs:
           
           VARIANT="${{ inputs.kernelsu_variant }}"
           
-          case "$VARIANT" in
-            "wild")
-              git clone https://github.com/WildKernels/Wild_KSU.git KernelSU
-              ;;
-            "sukisu")
-              git clone https://github.com/ShirkNeko/SuKiSu.git KernelSU
-              ;;
-            "next")
-              git clone --recurse-submodules https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
-              ;;
-          esac
+          # -----------------------------------------------------
+          # KernelSU klonen (idempotent!)
+          # -----------------------------------------------------
+          
+          if [ ! -d "KernelSU" ]; then
+            echo "Cloning KernelSU ($VARIANT)..."
+            case "$VARIANT" in
+              "wild")
+                git clone https://github.com/WildKernels/Wild_KSU.git KernelSU
+                ;;
+              "sukisu")
+                git clone https://github.com/ShirkNeko/SuKiSu.git KernelSU
+                ;;
+              "next")
+                git clone --recurse-submodules https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
+                ;;
+            esac
+          else
+            echo "KernelSU already exists, skipping clone"
+          fi
+          
+          # -----------------------------------------------------
+          # Version setzen (manuell)
+          # -----------------------------------------------------
           
           cd KernelSU
-          git fetch --tags
+          git fetch --tags || true
           KSU_VERSION="3.0.0"
           cd ..
           
