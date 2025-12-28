@@ -1,14 +1,8 @@
-name: 1 Kernel + SUSFS
+name: KernelSU Next + SUSFS
 
 on:
   workflow_dispatch:
     inputs:
-      kernelsu_variant:
-        description: 'KernelSU Variante'
-        required: true
-        default: 'wild'
-        type: choice
-        options: [wild, sukisu, next]
       gki_branch:
         description: 'GKI Branch'
         required: true
@@ -43,14 +37,15 @@ jobs:
       - name: Setup Build Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y git ccache build-essential repo bc flex bison \
-            libssl-dev libelf-dev pahole python3 python-is-python3 zip unzip curl
+          sudo apt-get install -y \
+            git ccache build-essential repo bc flex bison \
+            libssl-dev libelf-dev pahole python3 python-is-python3 \
+            zip unzip curl
 
       - name: Set Variables
         id: vars
         run: |
           echo "BRANCH=${{ inputs.gki_branch }}" >> $GITHUB_OUTPUT
-          echo "KERNEL_VERSION=$(echo '${{ inputs.gki_branch }}' | cut -d'-' -f2)" >> $GITHUB_OUTPUT
 
 # --------------------------------------------------
 # KERNEL SOURCE
@@ -63,20 +58,16 @@ jobs:
           repo sync -c -j$(nproc) --no-tags --no-clone-bundle
 
 # --------------------------------------------------
-# KERNELSU (MANUAL, BAZEL-SAFE)
+# KERNELSU NEXT (BAZEL SAFE)
 # --------------------------------------------------
-      - name: Setup KernelSU
+      - name: Setup KernelSU Next
         run: |
           set -e
           cd kernel_workspace/common
 
-          VARIANT="${{ inputs.kernelsu_variant }}"
-
-          case "$VARIANT" in
-            wild)   git clone https://github.com/WildKernels/Wild_KSU.git KernelSU ;;
-            sukisu) git clone https://x-access-token:${GITHUB_TOKEN}@github.com/ShirkNeko/SuKiSu.git KernelSUU ;;
-            next)   git clone --recurse-submodules https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU ;;
-          esac
+          echo "Cloning KernelSU Next…"
+          git clone --recurse-submodules \
+            https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
 
           cd KernelSU
           git fetch --tags
@@ -87,7 +78,7 @@ jobs:
           rm -rf drivers/kernelsu
           cp -r KernelSU/kernel drivers/kernelsu
 
-          # Bazel-fester Version Inject (kein .git nötig)
+          # Bazel-feste Version Injection
           KBUILD=drivers/kernelsu/Kbuild
           {
             echo "KSU_GIT_VERSION := $KSU_COMMITS"
@@ -98,112 +89,42 @@ jobs:
           } > "$KBUILD.new"
           mv "$KBUILD.new" "$KBUILD"
 
-          grep -q kernelsu drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+          grep -q kernelsu drivers/Makefile || \
+            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+
           grep -q kernelsu/Kconfig drivers/Kconfig || \
             sed -i '/^endmenu$/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+
+          echo "✓ KernelSU Next integrated"
 
 # --------------------------------------------------
 # SUSFS
 # --------------------------------------------------
-
       - name: Setup SUSFS
         if: inputs.enable_susfs
         run: |
           set -e
-      
           cd kernel_workspace
-      
-          # SUSFS sauber neu klonen (GKI-Branch!)
+
           rm -rf susfs
-          
           git clone --depth=1 \
             -b gki-${{ steps.vars.outputs.BRANCH }} \
             https://github.com/WildKernels/susfs4ksu.git susfs
-          
-          echo "✓ SUSFS cloned (branch: gki-${{ steps.vars.outputs.BRANCH }})"
-      
+
           cd common
-      
           SUSFS_SRC="../susfs/kernel_patches"
-      
-          echo "Using SUSFS_SRC=$SUSFS_SRC"
-          ls -la "$SUSFS_SRC"
-      
-          # -----------------------------------
-          # Step 1: Quellen kopieren
-          # -----------------------------------
+
           cp "$SUSFS_SRC/fs/susfs.c" fs/susfs.c
           cp "$SUSFS_SRC/include/linux/susfs.h" include/linux/susfs.h
-          echo "✓ SUSFS sources copied"
-      
-          # -----------------------------------
-          # Step 2: Kernel Patch (6.6 safe)
-          # -----------------------------------
-          KERNEL_PATCH="$SUSFS_SRC/50_add_susfs_in_gki-${{ steps.vars.outputs.BRANCH }}.patch"
-      
-          if [ ! -f "$KERNEL_PATCH" ]; then
-            echo "❌ SUSFS kernel patch not found:"
-            echo "   $KERNEL_PATCH"
-            exit 1
-          fi
-      
-          echo "Applying kernel SUSFS patch..."
-          patch -p1 < "$KERNEL_PATCH" || true
-      
-          # Erwarteter 6.6-Drift → ignorieren
+
+          PATCH="$SUSFS_SRC/50_add_susfs_in_gki-${{ steps.vars.outputs.BRANCH }}.patch"
+          patch -p1 < "$PATCH" || true
           rm -f fs/proc/base.c.rej || true
-      
-          # -----------------------------------
-          # Step 3: KernelSU Integration
-          # -----------------------------------
-          KSU_PATCH="$SUSFS_SRC/KernelSU/enable_susfs_for_ksu.patch"
-      
-          if [ -f "$KSU_PATCH" ]; then
-            echo "Applying KernelSU SUSFS patch..."
-            cd drivers/kernelsu
-            patch -p1 < "$KSU_PATCH" || true
-            cd ../..
-          else
-            echo "⚠ KernelSU SUSFS patch not found (continuing)"
-          fi
-      
-          # -----------------------------------
-          # Verification
-          # -----------------------------------
-          echo "=== SUSFS verification ==="
-          
-          if [ -f fs/susfs.c ]; then
-            echo "✓ fs/susfs.c present"
-          else
-            echo "❌ fs/susfs.c missing"
-            exit 1
-          fi
-          
-          if [ -f include/linux/susfs.h ]; then
-            echo "✓ susfs.h present"
-          else
-            echo "❌ susfs.h missing"
-            exit 1
-          fi
-          
-          if grep -rq susfs fs; then
-            echo "✓ kernel SUSFS hooks present"
-          else
-            echo "❌ kernel SUSFS hooks missing"
-            exit 1
-          fi
-          
-          # KernelSU SUSFS ist OPTIONAL (Next hat oft keine)
-          if grep -rq susfs drivers/kernelsu 2>/dev/null; then
-            echo "✓ KernelSU SUSFS hooks present"
-          else
-            echo "ℹ KernelSU SUSFS hooks not present (OK for KernelSU Next)"
-          fi
-          
-          echo "✓ SUSFS verification complete"
+
+          echo "✓ SUSFS kernel patch applied"
 
 # --------------------------------------------------
-# CONFIG (FRAGMENT ONLY – GKI SAFE)
+# CONFIG (FRAGMENT – GKI SAFE)
 # --------------------------------------------------
       - name: Create gki_defconfig.fragment
         if: inputs.enable_susfs
@@ -224,23 +145,20 @@ jobs:
           CONFIG_KSU_SUSFS_ENABLE_LOG=y
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           EOF
-          
-      - name: Fix WiFi & Bluetooth (disable protected exports)
+
+# --------------------------------------------------
+# WIFI / BLUETOOTH FIX
+# --------------------------------------------------
+      - name: Fix WiFi & Bluetooth
         run: |
-          set -e
           cd kernel_workspace/common
-
-          echo "Disabling protected exports for WiFi/BT compatibility"
-
           sed -i 's/CONFIG_PROTECTED_EXPORTS=y/# CONFIG_PROTECTED_EXPORTS is not set/' \
             arch/arm64/configs/gki_defconfig || true
 
-          mkdir -p arch/arm64/configs
           cat >> arch/arm64/configs/gki_defconfig.fragment << 'EOF'
-          # Fix WiFi / Bluetooth for custom kernel
           CONFIG_PROTECTED_EXPORTS=n
           EOF
-            
+
 # --------------------------------------------------
 # BUILD
 # --------------------------------------------------
@@ -260,5 +178,5 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-${{ inputs.kernelsu_variant }}
+          name: kernel-${{ steps.vars.outputs.BRANCH }}-kernelsu-next
           path: output/*
