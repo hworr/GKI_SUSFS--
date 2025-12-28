@@ -1,4 +1,4 @@
-name: claude Kernel + SUSFS
+name: c Kernel + SUSFS
 
 on:
   workflow_dispatch:
@@ -222,43 +222,49 @@ jobs:
           fi
           
           # ============================================
-          # CONFIG_KSU in defconfig aktivieren
+          # CONFIG_KSU in Kconfig als default aktivieren
+          # NICHT die defconfig ändern (Bazel Check!)
           # ============================================
           echo ""
-          echo "=== Enabling CONFIG_KSU in defconfig ==="
+          echo "=== Setting CONFIG_KSU default in Kconfig ==="
           
-          # Finde gki_defconfig
-          GKI_DEFCONFIG=""
-          for config in "arch/arm64/configs/gki_defconfig" \
-                        "../build/build.config.gki.aarch64"; do
-            if [ -f "$config" ]; then
-              GKI_DEFCONFIG="$config"
-              break
-            fi
-          done
-          
-          if [ -n "$GKI_DEFCONFIG" ]; then
-            if ! grep -q "CONFIG_KSU=y" "$GKI_DEFCONFIG"; then
-              echo "CONFIG_KSU=y" >> "$GKI_DEFCONFIG"
-              echo "✓ Added CONFIG_KSU=y to $GKI_DEFCONFIG"
-            else
-              echo "CONFIG_KSU=y already present in $GKI_DEFCONFIG"
-            fi
+          KCONFIG_FILE="drivers/kernelsu/Kconfig"
+          if [ -f "$KCONFIG_FILE" ]; then
+            # Füge default y für CONFIG_KSU hinzu
+            python3 << 'PYTHON_SCRIPT'
+import re
+
+with open('drivers/kernelsu/Kconfig', 'r') as f:
+    content = f.read()
+
+# Suche nach "config KSU" und füge "default y" hinzu
+pattern = r'(config KSU\s+tristate[^\n]*\n)'
+match = re.search(pattern, content)
+if match:
+    # Prüfe ob default y schon vorhanden
+    rest = content[match.end():match.end()+200]
+    if 'default y' not in rest.split('config ')[0]:
+        replacement = match.group(1) + '\tdefault y\n'
+        content = content[:match.start()] + replacement + content[match.end():]
+        print("Added default y to CONFIG_KSU")
+    else:
+        print("CONFIG_KSU already has default y")
+else:
+    print("config KSU not found in Kconfig")
+
+with open('drivers/kernelsu/Kconfig', 'w') as f:
+    f.write(content)
+PYTHON_SCRIPT
+            echo "✓ Kconfig updated"
           else
-            echo "Creating gki_defconfig fragment..."
-            mkdir -p arch/arm64/configs
-            echo "CONFIG_KSU=y" > arch/arm64/configs/ksu.config
+            echo "WARNING: Kconfig not found"
           fi
           
           # Zeige KernelSU Kconfig für Debugging
           echo ""
-          echo "=== KernelSU Kconfig ==="
-          if [ -f "drivers/kernelsu/Kconfig" ]; then
-            cat drivers/kernelsu/Kconfig
-          else
-            echo "WARNING: drivers/kernelsu/Kconfig not found!"
-          fi
-          echo "========================"
+          echo "=== KernelSU Kconfig (first 30 lines) ==="
+          head -30 "$KCONFIG_FILE" 2>/dev/null || echo "Kconfig not found"
+          echo "=========================================="
           
           # Verify
           echo ""
@@ -573,58 +579,82 @@ jobs:
             echo "  (may already be applied)"
           fi
           
-          # 2. Erstelle/Update gki_defconfig für SUSFS
+          # ============================================
+          # WICHTIG: Bazel prüft die defconfig auf Konsistenz
+          # Wir dürfen sie NICHT direkt ändern!
+          # Stattdessen: Setze "default y" in der Kconfig
+          # ============================================
           echo ""
-          echo "=== Configuring kernel for SUSFS ==="
+          echo "=== Enabling SUSFS options in Kconfig ==="
           
-          # Finde alle möglichen defconfig Orte
-          for defconfig in "arch/arm64/configs/gki_defconfig" \
-                          "common/arch/arm64/configs/gki_defconfig"; do
-            if [ -f "$defconfig" ]; then
-              echo "Found defconfig: $defconfig"
+          KCONFIG_FILE="drivers/kernelsu/Kconfig"
+          
+          if [ -f "$KCONFIG_FILE" ]; then
+            echo "Found KernelSU Kconfig"
+            
+            # Backup
+            cp "$KCONFIG_FILE" "$KCONFIG_FILE.backup"
+            
+            # Prüfe ob SUSFS Optionen vorhanden sind
+            if grep -q "KSU_SUSFS" "$KCONFIG_FILE"; then
+              echo "SUSFS options found in Kconfig"
               
-              # Füge KSU und SUSFS Optionen hinzu
-              {
-                grep -q "CONFIG_KSU=y" "$defconfig" || echo "CONFIG_KSU=y"
-                grep -q "CONFIG_KSU_SUSFS=y" "$defconfig" || echo "CONFIG_KSU_SUSFS=y"
-                grep -q "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y"
-                grep -q "CONFIG_KSU_SUSFS_SUS_PATH=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
-                grep -q "CONFIG_KSU_SUSFS_SUS_MOUNT=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
-                grep -q "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y"
-                grep -q "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y"
-                grep -q "CONFIG_KSU_SUSFS_SUS_KSTAT=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
-                grep -q "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y"
-                grep -q "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y"
-                grep -q "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
-                grep -q "CONFIG_KSU_SUSFS_ENABLE_LOG=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y"
-                grep -q "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" "$defconfig" || echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
-              } >> "$defconfig"
+              # Einfacher Ansatz: Ersetze "bool" mit "bool ... default y"
+              # für alle SUSFS Optionen
               
-              echo "✓ Updated $defconfig with SUSFS options"
+              # Erstelle ein temporäres Python script für präzises Patching
+              python3 << 'PYTHON_SCRIPT'
+import re
+
+with open('drivers/kernelsu/Kconfig', 'r') as f:
+    content = f.read()
+
+# Für jede config Option: füge "default y" hinzu falls nicht vorhanden
+configs = re.findall(r'config (KSU_SUSFS\w*|KSU)\b', content)
+print(f"Found configs: {configs}")
+
+for config in set(configs):
+    # Prüfe ob bereits default y hat
+    pattern = rf'(config {config}\s+(?:tristate|bool)[^\n]*\n)'
+    match = re.search(pattern, content)
+    if match:
+        # Prüfe ob default y schon vorhanden ist
+        config_block_start = match.end()
+        next_config = content.find('config ', config_block_start)
+        if next_config == -1:
+            next_config = len(content)
+        config_block = content[config_block_start:next_config]
+        
+        if 'default y' not in config_block:
+            # Füge default y nach der bool/tristate Zeile ein
+            replacement = match.group(1) + '\tdefault y\n'
+            content = content[:match.start()] + replacement + content[match.end():]
+            print(f"Added default y to {config}")
+        else:
+            print(f"{config} already has default y")
+
+with open('drivers/kernelsu/Kconfig', 'w') as f:
+    f.write(content)
+
+print("Kconfig updated successfully")
+PYTHON_SCRIPT
+              
+              echo ""
+              echo "=== Updated Kconfig (SUSFS section) ==="
+              grep -A2 "config KSU" "$KCONFIG_FILE" | head -20
+              echo "..."
+              grep -B1 -A2 "SUSFS" "$KCONFIG_FILE" | head -40
+              echo "========================================"
+            else
+              echo "WARNING: No SUSFS options in Kconfig!"
+              echo "The SUSFS KSU patch may not have been applied correctly."
+              echo ""
+              echo "=== Full Kconfig content ==="
+              cat "$KCONFIG_FILE"
+              echo "============================"
             fi
-          done
-          
-          # 3. Für Bazel: Erstelle config fragment
-          if [ -d "common" ]; then
-            FRAGMENT="common/arch/arm64/configs/gki_defconfig.fragment"
-            mkdir -p "$(dirname "$FRAGMENT")"
-            cat > "$FRAGMENT" << 'EOF'
-          # KernelSU + SUSFS Configuration
-          CONFIG_KSU=y
-          CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=y
-          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          EOF
-            echo "✓ Created config fragment: $FRAGMENT"
+          else
+            echo "WARNING: KernelSU Kconfig not found at $KCONFIG_FILE"
           fi
           
           echo ""
@@ -735,9 +765,10 @@ jobs:
           # Zeige aktuelle Konfiguration
           echo ""
           echo "=== Build Configuration ==="
-          if [ -f "common/arch/arm64/configs/gki_defconfig" ]; then
-            echo "KSU/SUSFS options in defconfig:"
-            grep -E "CONFIG_KSU|CONFIG_SUSFS" common/arch/arm64/configs/gki_defconfig 2>/dev/null || echo "(none found)"
+          echo "Checking KernelSU Kconfig for enabled options..."
+          if [ -f "common/drivers/kernelsu/Kconfig" ]; then
+            echo "KernelSU Kconfig:"
+            grep -E "config KSU|default y|bool|tristate" common/drivers/kernelsu/Kconfig | head -30
           fi
           echo "============================"
           echo ""
