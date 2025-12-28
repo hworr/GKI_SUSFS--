@@ -1,0 +1,14 @@
+if [ ! -d "common/fs/susfs" ]; then
+  echo "ERROR: common/fs/susfs directory not created"
+  exit 1
+fi
+
+if [ ! -f "common/include/linux/susfs.h" ]; then
+  echo "ERROR: common/include/linux/susfs.h not found"
+  exit 1
+fi
+
+cp -v susfs4ksu/kernel_patches/include/linux/susfs.h common/include/linux/
+cp -rv susfs4ksu/kernel_patches/fs/susfs common/fs/
+cp susfs4ksu/kernel_patches/include/linux/* common/include/linux/ 2>/dev/null || true
+cp -rv susfs4ksu/kernel_patches/fs/susfs common/fs/
