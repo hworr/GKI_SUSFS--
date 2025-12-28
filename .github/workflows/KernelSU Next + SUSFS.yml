@@ -145,25 +145,35 @@ jobs:
         esac
 
     # --------------------------------------------------
-    # SUSFS 2.0 (KernelSU Next, AIO patch – pinned)
+    # SUSFS 2.0 (KernelSU Next)
     # --------------------------------------------------
     - name: Apply SUSFS 2.0
       if: ${{ inputs.ksu_variant == 'kernelsu-next' && inputs.enable_susfs }}
       working-directory: kernel
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         set -e
     
-        SUSFS_PATCH_URL="https://raw.githubusercontent.com/WildKernels/susfs4ksu/6b6a4c1/kernel_patches/susfs-2.0-AIO.patch"
+        echo "Cloning SUSFS repo (stable, via token)"
+        git clone https://x-access-token:${GITHUB_TOKEN}@github.com/WildKernels/susfs4ksu.git susfs
     
-        echo "Downloading SUSFS 2.0 AIO patch"
-        curl -fL "$SUSFS_PATCH_URL" -o susfs-2.0-AIO.patch
+        echo "Searching for SUSFS AIO patch..."
+        find susfs -iname "*susfs*2.0*AIO*.patch" -maxdepth 4 -print
     
-        echo "Verifying patch file"
-        wc -l susfs-2.0-AIO.patch
-        head -n 5 susfs-2.0-AIO.patch
+        PATCH_FILE=$(find susfs -iname "*susfs*2.0*AIO*.patch" | head -n 1)
     
-        echo "Applying SUSFS 2.0 AIO patch"
-        patch -p1 < susfs-2.0-AIO.patch
+        if [ -z "$PATCH_FILE" ]; then
+          echo "❌ SUSFS 2.0 AIO patch not found in repo"
+          exit 1
+        fi
+
+        echo "Using patch: $PATCH_FILE"
+        wc -l "$PATCH_FILE"
+        head -n 5 "$PATCH_FILE"
+    
+        echo "Applying SUSFS patch"
+        patch -p1 < "$PATCH_FILE"
 
     # --------------------------------------------------
     # DEFCONFIG
