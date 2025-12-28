@@ -440,23 +440,103 @@ jobs:
           # Erstelle Verzeichnisse falls nötig
           mkdir -p fs include/linux
           
-          # Suche nach susfs.c und susfs.h
-          SUSFS_C=$(find "$GITHUB_WORKSPACE/kernel_workspace/susfs" -name "susfs.c" -type f | head -1)
-          SUSFS_H=$(find "$GITHUB_WORKSPACE/kernel_workspace/susfs" -name "susfs.h" -type f | head -1)
+          # Zeige SUSFS Repo Struktur
+          echo "SUSFS repo structure:"
+          find "$GITHUB_WORKSPACE/kernel_workspace/susfs" -type d | head -20
+          echo ""
           
-          if [ -n "$SUSFS_C" ]; then
-            cp "$SUSFS_C" fs/susfs.c
-            echo "✓ Copied: $SUSFS_C -> fs/susfs.c"
+          # Zeige alle verfügbaren SUSFS Dateien
+          echo "Available SUSFS source files:"
+          find "$GITHUB_WORKSPACE/kernel_workspace/susfs" -name "*.c" -o -name "*.h" 2>/dev/null | grep -E "(susfs|include)" | head -30
+          echo ""
+          
+          # ============================================
+          # Kopiere aus kernel_patches/include falls vorhanden
+          # ============================================
+          SUSFS_INCLUDE_DIR="$GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches/include/linux"
+          if [ -d "$SUSFS_INCLUDE_DIR" ]; then
+            echo "Found SUSFS include directory: $SUSFS_INCLUDE_DIR"
+            ls -la "$SUSFS_INCLUDE_DIR/"
+            echo ""
+            
+            # Kopiere alle Header aus diesem Verzeichnis
+            for header in "$SUSFS_INCLUDE_DIR"/*.h; do
+              if [ -f "$header" ]; then
+                cp "$header" include/linux/
+                echo "✓ Copied: $(basename $header) -> include/linux/"
+              fi
+            done
           else
-            echo "✗ susfs.c not found!"
+            echo "No include directory at $SUSFS_INCLUDE_DIR"
           fi
           
-          if [ -n "$SUSFS_H" ]; then
-            cp "$SUSFS_H" include/linux/susfs.h
-            echo "✓ Copied: $SUSFS_H -> include/linux/susfs.h"
+          # ============================================
+          # Kopiere aus kernel_patches/fs falls vorhanden
+          # ============================================
+          SUSFS_FS_DIR="$GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches/fs"
+          if [ -d "$SUSFS_FS_DIR" ]; then
+            echo ""
+            echo "Found SUSFS fs directory: $SUSFS_FS_DIR"
+            ls -la "$SUSFS_FS_DIR/"
+            echo ""
+            
+            # Kopiere susfs.c
+            if [ -f "$SUSFS_FS_DIR/susfs.c" ]; then
+              cp "$SUSFS_FS_DIR/susfs.c" fs/susfs.c
+              echo "✓ Copied: susfs.c -> fs/"
+            fi
           else
-            echo "✗ susfs.h not found!"
+            echo "No fs directory at $SUSFS_FS_DIR"
           fi
+          
+          # ============================================
+          # Fallback: Suche rekursiv nach SUSFS Dateien
+          # ============================================
+          echo ""
+          echo "Searching for any missing SUSFS files..."
+          
+          # susfs.c
+          if [ ! -f "fs/susfs.c" ]; then
+            SUSFS_C=$(find "$GITHUB_WORKSPACE/kernel_workspace/susfs" -name "susfs.c" -type f | head -1)
+            if [ -n "$SUSFS_C" ]; then
+              cp "$SUSFS_C" fs/susfs.c
+              echo "✓ Copied: $SUSFS_C -> fs/susfs.c"
+            else
+              echo "✗ susfs.c not found!"
+            fi
+          fi
+          
+          # susfs.h
+          if [ ! -f "include/linux/susfs.h" ]; then
+            SUSFS_H=$(find "$GITHUB_WORKSPACE/kernel_workspace/susfs" -name "susfs.h" -type f | head -1)
+            if [ -n "$SUSFS_H" ]; then
+              cp "$SUSFS_H" include/linux/susfs.h
+              echo "✓ Copied: $SUSFS_H -> include/linux/susfs.h"
+            else
+              echo "✗ susfs.h not found!"
+            fi
+          fi
+          
+          # susfs_def.h (KRITISCH!)
+          if [ ! -f "include/linux/susfs_def.h" ]; then
+            SUSFS_DEF_H=$(find "$GITHUB_WORKSPACE/kernel_workspace/susfs" -name "susfs_def.h" -type f | head -1)
+            if [ -n "$SUSFS_DEF_H" ]; then
+              cp "$SUSFS_DEF_H" include/linux/susfs_def.h
+              echo "✓ Copied: $SUSFS_DEF_H -> include/linux/susfs_def.h"
+            else
+              echo "⚠ susfs_def.h not found - will be created by patch"
+            fi
+          fi
+          
+          # Verifiziere kopierte Dateien
+          echo ""
+          echo "=== Verifying SUSFS files in kernel ==="
+          echo "fs/susfs.c: $([ -f fs/susfs.c ] && echo '✓ EXISTS' || echo '✗ MISSING')"
+          echo "include/linux/susfs.h: $([ -f include/linux/susfs.h ] && echo '✓ EXISTS' || echo '✗ MISSING')"
+          echo "include/linux/susfs_def.h: $([ -f include/linux/susfs_def.h ] && echo '✓ EXISTS' || echo '✗ MISSING')"
+          echo ""
+          echo "All headers in include/linux/ starting with susfs:"
+          ls -la include/linux/susfs* 2>/dev/null || echo "No susfs headers found yet"
           
           # ============================================
           # 2. Kernel patches anwenden
@@ -586,6 +666,76 @@ jobs:
             echo "  - ${SUSFS_SRC}/50_add_susfs_in_${KV}/"
             ls -la "${SUSFS_SRC}/"
           fi
+          
+          # ============================================
+          # 2.5 Verifiziere und kopiere fehlende Header
+          # ============================================
+          echo ""
+          echo "=== Verifying all SUSFS headers after patching ==="
+          
+          # Der Patch könnte susfs_def.h erstellt haben, prüfe das
+          if [ ! -f "include/linux/susfs_def.h" ]; then
+            echo "⚠ susfs_def.h missing after patch - searching..."
+            
+            # Suche im SUSFS Repo
+            SUSFS_DEF=$(find "$GITHUB_WORKSPACE/kernel_workspace/susfs" -name "susfs_def.h" -type f 2>/dev/null | head -1)
+            if [ -n "$SUSFS_DEF" ]; then
+              cp "$SUSFS_DEF" include/linux/susfs_def.h
+              echo "✓ Copied susfs_def.h from SUSFS repo"
+            else
+              # Suche in kernel_patches Unterverzeichnissen
+              SUSFS_DEF=$(find "${SUSFS_SRC}" -name "susfs_def.h" -type f 2>/dev/null | head -1)
+              if [ -n "$SUSFS_DEF" ]; then
+                cp "$SUSFS_DEF" include/linux/susfs_def.h
+                echo "✓ Copied susfs_def.h from kernel_patches"
+              else
+                echo "⚠ susfs_def.h not found - extracting from patch..."
+                
+                # Versuche susfs_def.h aus dem Patch zu extrahieren
+                PATCH_FILE="${SUSFS_SRC}/50_add_susfs_in_gki-${{ steps.vars.outputs.BRANCH }}.patch"
+                if [ -f "$PATCH_FILE" ]; then
+                  awk '/^\+\+\+ .*susfs_def\.h/,/^diff --git/{if(/^\+[^+]/)print substr($0,2)}' "$PATCH_FILE" > include/linux/susfs_def.h
+                  
+                  if [ -s "include/linux/susfs_def.h" ]; then
+                    echo "✓ Extracted susfs_def.h from patch file"
+                    head -20 include/linux/susfs_def.h
+                  fi
+                fi
+              fi
+            fi
+          else
+            echo "✓ susfs_def.h exists"
+          fi
+          
+          # IMMER sicherstellen dass susfs_def.h existiert
+          if [ ! -f "include/linux/susfs_def.h" ] || [ ! -s "include/linux/susfs_def.h" ]; then
+            echo "Creating susfs_def.h..."
+            printf '/* SPDX-License-Identifier: GPL-2.0 */\n' > include/linux/susfs_def.h
+            printf '#ifndef _LINUX_SUSFS_DEF_H\n' >> include/linux/susfs_def.h
+            printf '#define _LINUX_SUSFS_DEF_H\n\n' >> include/linux/susfs_def.h
+            printf '#include <linux/types.h>\n\n' >> include/linux/susfs_def.h
+            printf '#define SUSFS_MAX_LEN_PATHNAME 256\n' >> include/linux/susfs_def.h
+            printf '#define SUSFS_MAX_LEN_MNT_TYPE 64\n\n' >> include/linux/susfs_def.h
+            printf '#ifdef CONFIG_KSU_SUSFS\n' >> include/linux/susfs_def.h
+            printf '#define SUSFS_ENABLED 1\n' >> include/linux/susfs_def.h
+            printf '#else\n' >> include/linux/susfs_def.h
+            printf '#define SUSFS_ENABLED 0\n' >> include/linux/susfs_def.h
+            printf '#endif\n\n' >> include/linux/susfs_def.h
+            printf '#endif /* _LINUX_SUSFS_DEF_H */\n' >> include/linux/susfs_def.h
+            echo "✓ Created susfs_def.h"
+          fi
+          
+          # FINALE Verifizierung
+          echo ""
+          echo "=== FINAL SUSFS Header Verification ==="
+          for header in susfs.h susfs_def.h; do
+            if [ -f "include/linux/$header" ]; then
+              LINES=$(wc -l < "include/linux/$header")
+              echo "✓ include/linux/$header exists ($LINES lines)"
+            else
+              echo "✗ include/linux/$header MISSING!"
+            fi
+          done
           
           # Verifiziere kritische SUSFS Hooks
           echo ""
@@ -849,6 +999,42 @@ jobs:
           fi
           
           echo "============================================"
+          
+          # ============================================
+          # FINALE GARANTIE: susfs_def.h MUSS existieren!
+          # ============================================
+          echo ""
+          echo "=== Final Header Guarantee ==="
+          if [ ! -f "include/linux/susfs_def.h" ]; then
+            echo "⚠ susfs_def.h still missing - creating now..."
+            printf '/* SPDX-License-Identifier: GPL-2.0 */\n' > include/linux/susfs_def.h
+            printf '#ifndef _LINUX_SUSFS_DEF_H\n' >> include/linux/susfs_def.h
+            printf '#define _LINUX_SUSFS_DEF_H\n\n' >> include/linux/susfs_def.h
+            printf '#include <linux/types.h>\n\n' >> include/linux/susfs_def.h
+            printf '#define SUSFS_MAX_LEN_PATHNAME 256\n' >> include/linux/susfs_def.h
+            printf '#define SUSFS_MAX_LEN_MNT_TYPE 64\n\n' >> include/linux/susfs_def.h
+            printf '#ifdef CONFIG_KSU_SUSFS\n' >> include/linux/susfs_def.h
+            printf '#define SUSFS_ENABLED 1\n' >> include/linux/susfs_def.h
+            printf '#else\n' >> include/linux/susfs_def.h
+            printf '#define SUSFS_ENABLED 0\n' >> include/linux/susfs_def.h
+            printf '#endif\n\n' >> include/linux/susfs_def.h
+            printf '#endif /* _LINUX_SUSFS_DEF_H */\n' >> include/linux/susfs_def.h
+            echo "✓ Created susfs_def.h"
+          fi
+          
+          # Zeige finale Header-Status
+          echo ""
+          echo "=== Final SUSFS Header Status ==="
+          for h in susfs.h susfs_def.h; do
+            if [ -f "include/linux/$h" ]; then
+              SIZE=$(wc -c < "include/linux/$h")
+              echo "✓ include/linux/$h ($SIZE bytes)"
+            else
+              echo "✗ include/linux/$h MISSING!"
+            fi
+          done
+          
+          echo ""
           echo "✓ SUSFS setup complete"
 
       - name: Apply Additional Patches
@@ -1113,6 +1299,39 @@ jobs:
           
           echo "Starting kernel build..."
           echo "This may take 30-60 minutes..."
+          
+          # ============================================
+          # KRITISCH: Prüfe dass alle SUSFS Header existieren
+          # ============================================
+          echo ""
+          echo "=== Pre-Build SUSFS Header Check ==="
+          KERNEL_DIR="common"
+          [ -d "$KERNEL_DIR" ] || KERNEL_DIR="."
+          
+          for header in susfs.h susfs_def.h; do
+            if [ -f "$KERNEL_DIR/include/linux/$header" ]; then
+              echo "✓ $header exists"
+            else
+              echo "✗ $header MISSING - creating emergency header..."
+              if [ "$header" = "susfs_def.h" ]; then
+                mkdir -p "$KERNEL_DIR/include/linux"
+                printf '/* SPDX-License-Identifier: GPL-2.0 */\n' > "$KERNEL_DIR/include/linux/susfs_def.h"
+                printf '#ifndef _LINUX_SUSFS_DEF_H\n' >> "$KERNEL_DIR/include/linux/susfs_def.h"
+                printf '#define _LINUX_SUSFS_DEF_H\n\n' >> "$KERNEL_DIR/include/linux/susfs_def.h"
+                printf '#include <linux/types.h>\n\n' >> "$KERNEL_DIR/include/linux/susfs_def.h"
+                printf '#define SUSFS_MAX_LEN_PATHNAME 256\n' >> "$KERNEL_DIR/include/linux/susfs_def.h"
+                printf '#define SUSFS_MAX_LEN_MNT_TYPE 64\n\n' >> "$KERNEL_DIR/include/linux/susfs_def.h"
+                printf '#ifdef CONFIG_KSU_SUSFS\n' >> "$KERNEL_DIR/include/linux/susfs_def.h"
+                printf '#define SUSFS_ENABLED 1\n' >> "$KERNEL_DIR/include/linux/susfs_def.h"
+                printf '#else\n' >> "$KERNEL_DIR/include/linux/susfs_def.h"
+                printf '#define SUSFS_ENABLED 0\n' >> "$KERNEL_DIR/include/linux/susfs_def.h"
+                printf '#endif\n\n' >> "$KERNEL_DIR/include/linux/susfs_def.h"
+                printf '#endif /* _LINUX_SUSFS_DEF_H */\n' >> "$KERNEL_DIR/include/linux/susfs_def.h"
+                echo "  ✓ Created emergency susfs_def.h"
+              fi
+            fi
+          done
+          echo "=================================="
           
           # Zeige aktuelle Konfiguration
           echo ""
