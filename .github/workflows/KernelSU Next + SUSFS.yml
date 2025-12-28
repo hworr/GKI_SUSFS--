@@ -145,21 +145,21 @@ jobs:
         esac
 
     # --------------------------------------------------
-    # SUSFS 2.0 (KernelSU Next only)
+    # SUSFS 2.0 (KernelSU Next only, AIO patch)
     # --------------------------------------------------
     - name: Apply SUSFS 2.0
       if: ${{ inputs.ksu_variant == 'kernelsu-next' && inputs.enable_susfs }}
       working-directory: kernel
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
       run: |
         set -e
     
-        echo "Cloning SUSFS (KernelSU-Next repo, token-auth)"
-        git clone https://x-access-token:${GITHUB_TOKEN}@github.com/KernelSU-Next/susfs.git
+        echo "Downloading SUSFS 2.0 AIO patch"
+        curl -L \
+          https://raw.githubusercontent.com/WildKernels/susfs4ksu/main/kernel_patches/susfs-2.0-AIO.patch \
+          -o susfs-2.0-AIO.patch
     
         echo "Applying SUSFS 2.0 AIO patch"
-        patch -p1 < susfs/kernel_patches/susfs-2.0-AIO.patch
+        patch -p1 < susfs-2.0-AIO.patch
 
     # --------------------------------------------------
     # DEFCONFIG
