@@ -52,9 +52,14 @@ jobs:
         run: |
           cd kernel_source
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
-          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android15-6.6 susfs4ksu || git clone --depth=1 https://gitlab.com/pershoot/susfs4ksu.git -b gki-android15 susfs4ksu
-          cd susfs4ksu
-          ./install.sh ../
+          git clone --depth=1 -b gki-android15-6.6 \
+          https://github.com/WildKernels/susfs4ksu.git susfs
+          
+          cp ../susfs/kernel_patches/fs/susfs.c fs/susfs.c
+          cp ../susfs/kernel_patches/include/linux/susfs.h include/linux/susfs.h
+          
+          patch -p1 < ../susfs/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch || true
+          rm -f fs/proc/base.c.rej || true
 
       - name: Integrate WildKSU (mit SusFS) (wenn ausgewählt)
         if: inputs.root_impl == 'wildksu'
