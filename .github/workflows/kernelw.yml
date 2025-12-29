@@ -1,0 +1,91 @@
+name: Kernel with Root
+
+on:
+  workflow_dispatch:
+    inputs:
+      root_impl:
+        description: 'Wähle die Root-Implementation'
+        required: true
+        default: 'kernelsu_next'
+        type: choice
+        options:
+          - kernelsu_next
+          - wildksu
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Kernel Source (android15-6.6)
+        uses: actions/checkout@v4
+        with:
+          repository: aosp-mirror/kernel_common
+          ref: android15-6.6
+          path: kernel_source
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev gcc g++ make cpio python3 unzip rsync git wget xz-utils
+
+      - name: Setup AOSP Clang (latest)
+        run: |
+          mkdir -p toolchains/clang
+          cd toolchains/clang
+          wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r522817.tar.gz
+          tar -xzf clang-r522817.tar.gz
+          echo "CLANG_PATH=$(pwd)/bin" >> $GITHUB_ENV
+
+      - name: Setup AOSP GCC (arm64 & arm)
+        run: |
+          mkdir -p toolchains/gcc/arm64
+          mkdir -p toolchains/gcc/arm
+          cd toolchains/gcc/arm64
+          wget https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/master.tar.gz -O - | tar -xzf -
+          cd ../arm
+          wget https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/heads/master.tar.gz -O - | tar -xzf -
+          echo "GCC_ARM64_PATH=$(pwd)/../arm64/bin" >> $GITHUB_ENV
+          echo "GCC_ARM_PATH=$(pwd)/bin" >> $GITHUB_ENV
+
+      - name: Integrate KernelSU Next + SusFS (wenn ausgewählt)
+        if: inputs.root_impl == 'kernelsu_next'
+        run: |
+          cd kernel_source
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android15-6.6 susfs4ksu || git clone --depth=1 https://gitlab.com/pershoot/susfs4ksu.git -b gki-android15 susfs4ksu
+          cd susfs4ksu
+          ./install.sh ../
+
+      - name: Integrate WildKSU (mit SusFS) (wenn ausgewählt)
+        if: inputs.root_impl == 'wildksu'
+        run: |
+          cd kernel_source
+          curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/main/kernel/setup.sh" | bash -s main || curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          git clone --depth=1 https://github.com/WildKernels/susfs4ksu.git susfs4ksu || git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android15-6.6 susfs4ksu
+          cd susfs4ksu
+          ./install.sh ../
+
+      - name: Build Kernel
+        run: |
+          cd kernel_source
+          export PATH=${{ env.CLANG_PATH }}:${{ env.GCC_ARM64_PATH }}:${{ env.GCC_ARM_PATH }}:$PATH
+          make O=out ARCH=arm64 gki_defconfig
+          make O=out ARCH=arm64 -j$(nproc) LLVM=1 LLVM_IAS=1
+
+      - name: Checkout AnyKernel3 für Packaging
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          path: AnyKernel3
+
+      - name: Package als flashbares ZIP
+        run: |
+          cp kernel_source/out/arch/arm64/boot/Image AnyKernel3/
+          cd AnyKernel3
+          zip -r9 ../${{ inputs.root_impl }}-android15-6.6-kernel.zip * -x README.md
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.root_impl }}-android15-6.6-kernel
+          path: ${{ inputs.root_impl }}-android15-6.6-kernel.zip
