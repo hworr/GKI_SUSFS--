@@ -4,33 +4,33 @@ on:
   workflow_dispatch:
     inputs:
       kernelsu_variant:
-        description: 'KernelSU Variante (alle SUSFS-kompatibel)'
+        description: 'KernelSU variant (all SUSFS compatible)'
         required: true
         default: 'wild'
         type: choice
         options:
-          - wild       # Wild KSU - Beste SUSFS Integration
-          - sukisu     # SuKiSu - Fokus auf Hiding
-          - next       # KernelSU Next - Aktiv entwickelt
+          - wild       # Wild KSU - Best SUSFS Integration
+          - sukisu     # SuKiSu - Focus on Hiding
+          - next       # KernelSU Next - Actively developed
       gki_branch:
         description: 'GKI Branch (Android + Kernel)'
         required: true
         default: 'android15-6.6'
         type: choice
         options:
-          - android15-6.6   # Pixel 9/10, neue Geräte
+          - android15-6.6   # Pixel 9/10, New devices
           - android14-6.1   # Pixel 8, Samsung S24
-          - android14-5.15  # Ältere Android 14 Geräte
-          - android13-5.15  # Android 13 Geräte
-          - android13-5.10  # Ältere Android 13
-          - android12-5.10  # Android 12 Geräte
+          - android14-5.15  # Ältere Android 14 Devices
+          - android13-5.15  # Android 13 Devices
+          - android13-5.10  # Older Android 13
+          - android12-5.10  # Android 12 devices
       enable_susfs:
-        description: 'SUSFS aktivieren'
+        description: 'Activate SUSFS'
         required: true
         default: true
         type: boolean
       build_lkm:
-        description: 'LKM statt GKI bauen (für locked Bootloader)'
+        description: 'Build LKM instead of GKI (for locked bootloader)'
         required: true
         default: false
         type: boolean
@@ -92,7 +92,7 @@ jobs:
           
           echo "Downloading manifest for ${BRANCH}..."
           
-          # Manifest URL ermitteln
+          # Manifest URL Determine
           MANIFEST_URL="https://android.googlesource.com/kernel/manifest"
           
           mkdir -p kernel_workspace && cd kernel_workspace
@@ -107,7 +107,7 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           
-          # Kernel Source Verzeichnis finden
+          # Find Kernel Source Directory
           if [ -d "common" ]; then
             KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/common"
           elif [ -d "private/gs-google" ]; then
@@ -120,7 +120,7 @@ jobs:
           
           echo "Kernel directory: $KERNEL_DIR"
           
-          # Prüfen ob drivers/ existiert
+          # Check if drivers/ exist
           if [ ! -d "$KERNEL_DIR/drivers" ]; then
             echo "ERROR: drivers/ not found in $KERNEL_DIR"
             echo "Contents:"
@@ -150,7 +150,7 @@ jobs:
               ;;
           esac
           
-          # Version aus Git holen
+          # Get version from Git
           cd KernelSU
           git fetch --tags
           KSU_VERSION=$(git describe --abbrev=0 --tags 2>/dev/null || echo "v1.0.0")
@@ -163,16 +163,16 @@ jobs:
           cd ..
           
           # ============================================
-          # Manuelle Integration (ohne setup.sh)
+          # Manual integration (without setup.sh)
           # ============================================
           
           echo "Integrating KernelSU into kernel..."
           
-          # Kopiere KernelSU kernel module
+          # CopyKernelSU kernel module
           rm -rf drivers/kernelsu
           cp -r KernelSU/kernel drivers/kernelsu
           
-          # Version in Kbuild hardcoden
+          # Version in Kbuild Hard codes
           KBUILD_FILE="drivers/kernelsu/Kbuild"
           if [ -f "$KBUILD_FILE" ]; then
             echo "Patching Kbuild with version $KSU_VERSION ($KSU_COMMITS commits)..."
@@ -180,9 +180,9 @@ jobs:
             # Backup
             cp "$KBUILD_FILE" "$KBUILD_FILE.original"
             
-            # LÖSUNG: Füge am ANFANG der Datei die Variablen ein
-            # BEVOR die ifeq-Prüfung auf .git läuft!
-            # Das setzt KSU_GIT_VERSION_VALID := 1 was die Fallback-Logik überspringt
+            # SOLUTION: Insert the variables at the beginning of the file
+            # BEFORE the ifeq check runs on .git!
+            # That sets KSU_GIT_VERSION_VALID := 1 which skips the fallback logic
             {
               echo "# =================================================="
               echo "# KernelSU Version - Hardcoded by GKI workflow"
@@ -202,27 +202,27 @@ jobs:
             echo "========================================"
           fi
           
-          # ZUSÄTZLICH: ksu.h patchen falls die Version dort definiert ist
+          # ADDITIONAL: patch ksu.h if the version is defined there
           KSU_H="drivers/kernelsu/ksu.h"
           if [ -f "$KSU_H" ]; then
             echo "Patching ksu.h..."
             sed -i 's/#define KERNEL_SU_VERSION_TAG.*/#define KERNEL_SU_VERSION_TAG "'"$KSU_VERSION"'"/' "$KSU_H" || true
           fi
           
-          # Makefile in drivers/Makefile hinzufügen
+          # Makefile in drivers/Makefile Add
           if ! grep -q "kernelsu" drivers/Makefile; then
             echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
             echo "Added kernelsu to drivers/Makefile"
           fi
           
-          # Kconfig in drivers/Kconfig hinzufügen
+          # Kconfig in drivers/Kconfig Add
           if ! grep -q "kernelsu/Kconfig" drivers/Kconfig; then
             sed -i '/^endmenu$/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
             echo "Added kernelsu to drivers/Kconfig"
           fi
           
-          # KSU_EXPECTED_SIZE und KSU_EXPECTED_HASH für den Manager
-          # (optional, aber gut für Kompatibilität)
+          # KSU_EXPECTED_SIZE And KSU_EXPECTED_HASH For the manager
+          # (optional,But good for compatibility)
           
           # Verify
           echo ""
@@ -323,7 +323,7 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           
-          # Kernel Source Verzeichnis finden
+          # Find Kernel Source Directory
           if [ -d "common" ]; then
             KERNEL_DIR="$GITHUB_WORKSPACE/kernel_workspace/common"
           elif [ -d "private/gs-google" ]; then
@@ -336,7 +336,7 @@ jobs:
           
           cd "$KERNEL_DIR"
           
-          # Verstecke KernelSU Symbole (Anti-Detection)
+          # Hide KernelSU Symbols (Anti-Detection)
           echo "Applying anti-detection patches..."
           
           SUSFS_SRC="$GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches"
@@ -349,13 +349,13 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           
-          # LTO=thin für schnelleren Build und weniger RAM
+          #LTO=thin for faster build and less RAM
           export LTO=thin
           
           echo "Starting kernel build..."
           echo "This may take 30-60 minutes..."
           
-          # Build mit Bazel (neuer Weg für GKI)
+          # Build With Bazel (New way for GKI)
           if [ -f "build/build.sh" ]; then
             # Legacy build
             BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
@@ -374,7 +374,7 @@ jobs:
           
           mkdir -p $GITHUB_WORKSPACE/output
           
-          # Kernel Image finden
+          # Kernel Image Find
           KERNEL_IMAGE=$(find . -name "Image" -type f | head -1)
           KERNEL_IMAGE_GZ=$(find . -name "Image.gz" -type f | head -1)
           KERNEL_IMAGE_LZ4=$(find . -name "Image.lz4" -type f | head -1)
@@ -394,7 +394,7 @@ jobs:
             echo "Found: Image.lz4"
           fi
           
-          # AnyKernel3 erstellen
+          # AnyKernel3 Draw up
           cd $GITHUB_WORKSPACE
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
           
@@ -405,7 +405,7 @@ jobs:
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
           sed -i 's/is_slot_device=0/is_slot_device=auto/g' anykernel.sh
           
-          # Kernel kopieren
+          # Copy kernel
           if [ -f "$GITHUB_WORKSPACE/output/Image" ]; then
             cp $GITHUB_WORKSPACE/output/Image .
           elif [ -f "$GITHUB_WORKSPACE/output/Image.gz" ]; then
@@ -464,7 +464,7 @@ jobs:
             - KernelSU Next: https://github.com/KernelSU-Next/KernelSU-Next
             - SuKiSu: https://github.com/ShirkNeko/SuKiSu
             
-            ### SUSFS Module (falls SUSFS aktiviert)
+            ### SUSFS Module (falls SUSFS Activated)
             - https://github.com/sidex15/ksu_module_susfs
           files: ${{ github.workspace }}/output/${{ steps.output.outputs.ZIP_NAME }}
           draft: false
